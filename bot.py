@@ -15,6 +15,7 @@ Sesli mesajlar otomatik yazıya çevrilip aktif modele sorulur.
 Her AI cevabının altında: 💾 Kaydet 🗑️ Temizle 🔊 Sesli Dinle 🔄 Yönlendir butonları.
 """
 import os
+import io
 import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,6 +34,13 @@ import config
 import storage
 from providers import get_adapter, ProviderError
 from voice import transcribe, synthesize_speech, VoiceError
+from image_gen import (
+    generate_pollinations_image,
+    generate_gemini_image,
+    generate_fal_image,
+    generate_json2video,
+    ImageGenError,
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -111,11 +119,18 @@ def category_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+def _provider_dict_for_category(category_key: str) -> dict:
+    if category_key == "image":
+        return config.IMAGE_PROVIDERS
+    return config.PROVIDERS  # varsayılan: sohbet AI
+
+
 def provider_menu(category_key: str) -> InlineKeyboardMarkup:
     """İlk seçim akışı: tıklanınca açıklama + onay ekranı gelir."""
     cat = config.CATEGORIES[category_key]
+    pdict = _provider_dict_for_category(category_key)
     buttons = [
-        [InlineKeyboardButton(config.PROVIDERS[p]["label"], callback_data=f"prov:{p}")]
+        [InlineKeyboardButton(pdict[p]["label"], callback_data=f"prov:{p}")]
         for p in cat["providers"]
     ]
     buttons.append([InlineKeyboardButton("⬅️ Geri", callback_data="menu:root")])
@@ -132,10 +147,23 @@ def quick_switch_menu(category_key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-def confirm_menu(provider_key: str) -> InlineKeyboardMarkup:
+def combined_switch_menu() -> InlineKeyboardMarkup:
+    """Yönlendir butonu: sohbet AI'ları VE ses (transkripsiyon) servislerini birlikte listeler."""
+    buttons = [
+        [InlineKeyboardButton(config.PROVIDERS[p]["label"], callback_data=f"switchuse:{p}")]
+        for p in config.CATEGORIES["chat"]["providers"]
+    ]
+    buttons.append([InlineKeyboardButton("── 🎙️ Ses Servisi ──", callback_data="noop")])
+    for key, info in config.TRANSCRIPTION_PROVIDERS.items():
+        buttons.append([InlineKeyboardButton(info["label"], callback_data=f"vswitchuse:{key}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def confirm_menu(provider_key: str, back_category: str = "chat") -> InlineKeyboardMarkup:
+    button_text = "✅ Bu modelle sohbete başla" if back_category == "chat" else "✅ Bunu kullan"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Bu modelle sohbete başla", callback_data=f"use:{provider_key}")],
-        [InlineKeyboardButton("⬅️ Geri", callback_data="cat:chat")],
+        [InlineKeyboardButton(button_text, callback_data=f"use:{provider_key}")],
+        [InlineKeyboardButton("⬅️ Geri", callback_data=f"cat:{back_category}")],
     ])
 
 
@@ -187,16 +215,37 @@ async def generate_and_deliver(bot, chat_id: int, user_id: int, user_message: st
     await send_long_text(bot, chat_id, reply, reply_markup=memory_buttons())
 
 
+async def activate_image_provider(query, provider_key: str):
+    """Bir görsel/video üretim servisini aktif eder (sohbet modundan çıkar)."""
+    user_id = query.from_user.id
+    storage.set_mode(user_id, "image")
+    storage.set_image_provider(user_id, provider_key)
+    info = config.IMAGE_PROVIDERS[provider_key]
+    kind_word = "video" if info["kind"] == "video" else "görsel"
+    await query.edit_message_text(
+        f"✅ Aktif: {info['label']}\n\n"
+        f"Şimdi bana ne istediğini anlatan bir mesaj gönder, senin için {kind_word} üreteyim!\n\n"
+        f"Sohbete geri dönmek için /menu → 🤖 Sohbet AI'dan bir model seç."
+    )
+
+
 async def activate_provider_and_continue(query, context, provider_key: str):
     """
     Bir modeli aktif eder ve son konuşulan kullanıcı mesajını -- önceden
     cevaplanmış olsa bile -- yeni modele tekrar sorar (tekrar yazmaya gerek
     kalmaz). Eğer önceki mesaj bir hata yüzünden hiç cevaplanamadıysa, aynı
     turu tekrarsız kullanır; cevaplanmışsa yeni bir soru turu olarak ekler.
+    Sağlayıcı bir görsel/video servisiyse, sohbet mantığı yerine görsel
+    üretim moduna geçer.
     """
+    if provider_key in config.IMAGE_PROVIDERS:
+        await activate_image_provider(query, provider_key)
+        return
+
     user_id = query.from_user.id
     chat_id = query.message.chat_id
     storage.set_provider(user_id, provider_key)
+    storage.set_mode(user_id, "chat")  # görsel modundan dönülüyor olabilir
     label = config.PROVIDERS[provider_key]["label"]
 
     session = storage.get_session(user_id)
@@ -273,7 +322,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if cat.get("info_text"):
-            extra_markup = voice_provider_menu() if cat_key == "voice" else back_only
+            if cat_key == "voice":
+                extra_markup = voice_provider_menu()
+            elif cat_key == "image":
+                extra_markup = provider_menu("image")
+            else:
+                extra_markup = back_only
             await query.edit_message_text(
                 f"{cat['label']}\n\n{cat['info_text']}",
                 reply_markup=extra_markup,
@@ -288,10 +342,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("prov:"):
         provider_key = data.split(":", 1)[1]
-        info = config.PROVIDERS[provider_key]
+        if provider_key in config.PROVIDERS:
+            info = config.PROVIDERS[provider_key]
+            back_cat = "chat"
+        else:
+            info = config.IMAGE_PROVIDERS[provider_key]
+            back_cat = "image"
         await query.edit_message_text(
             f"{info['label']}\n\n{info['description']}",
-            reply_markup=confirm_menu(provider_key),
+            reply_markup=confirm_menu(provider_key, back_cat),
         )
         return
 
@@ -315,9 +374,19 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "switch:menu":
         await query.message.reply_text(
-            "Hangi yapay zekaya geçmek istersin?",
-            reply_markup=quick_switch_menu("chat"),
+            "Ne değiştirmek istersin?",
+            reply_markup=combined_switch_menu(),
         )
+        return
+
+    if data == "noop":
+        return
+
+    if data.startswith("vswitchuse:"):
+        provider_key = data.split(":", 1)[1]
+        storage.set_transcription_provider(query.from_user.id, provider_key)
+        label = config.TRANSCRIPTION_PROVIDERS[provider_key]["label"]
+        await query.edit_message_text(f"✅ Sesli mesajlar artık şununla çevrilecek: {label}")
         return
 
     if data.startswith("switchuse:"):
@@ -362,12 +431,59 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== Metin mesajları ====================
 
+async def handle_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, session: dict, prompt: str):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    provider_key = session.get("image_provider", config.DEFAULT_IMAGE_PROVIDER_KEY)
+    info = config.IMAGE_PROVIDERS[provider_key]
+
+    action = "record_video" if info["kind"] == "video" else "upload_photo"
+    await context.bot.send_chat_action(chat_id=chat_id, action=action)
+
+    try:
+        if provider_key == "pollinations_image":
+            content = generate_pollinations_image(prompt)
+        elif provider_key == "gemini_image":
+            content = generate_gemini_image(prompt)
+        elif provider_key == "fal":
+            content = generate_fal_image(prompt)
+        elif provider_key == "json2video":
+            content = generate_json2video(prompt)
+        else:
+            raise ImageGenError("Bilinmeyen görsel/video sağlayıcı.")
+    except ImageGenError as e:
+        await update.message.reply_text(
+            f"⚠️ {info['label']} üretemedi:\n{e}", reply_markup=switch_button()
+        )
+        return
+    except Exception as e:
+        logger.exception("Görsel/video üretiminde beklenmeyen hata")
+        await update.message.reply_text(
+            f"⚠️ Beklenmeyen bir hata oluştu: {e}", reply_markup=switch_button()
+        )
+        return
+
+    caption = prompt[:200]
+    bio = io.BytesIO(content)
+    if info["kind"] == "video":
+        bio.name = "video.mp4"
+        await context.bot.send_video(chat_id=chat_id, video=bio, caption=f"🎬 {caption}")
+    else:
+        bio.name = "image.jpg"
+        await context.bot.send_photo(chat_id=chat_id, photo=bio, caption=f"🎨 {caption}")
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     session = storage.get_session(user_id)
-    provider_key = session["provider"]
     user_message = update.message.text
+
+    if session.get("mode") == "image":
+        await handle_image_prompt(update, context, session, user_message)
+        return
+
+    provider_key = session["provider"]
 
     # Mesajı hafızaya HEMEN kaydediyoruz (cevap gelmeden önce) — böylece model
     # hata verse bile mesaj kaybolmaz ve model değiştirince otomatik sorulabilir.
