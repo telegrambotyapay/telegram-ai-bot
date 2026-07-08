@@ -83,7 +83,7 @@ PROVIDERS = {
         "description": "Kurumsal odaklı Command modelleri, ücretsiz deneme kotası sunar.",
         "adapter_type": "cohere",
         "api_key_env": "COHERE_API_KEY",
-        "model_name": "command-r-plus",
+        "model_name": "command-a-plus-05-2026",
     },
     "huggingface": {
         "label": "🤗 Hugging Face",
