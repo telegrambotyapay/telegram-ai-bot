@@ -27,6 +27,7 @@ def get_session(user_id: int) -> Dict:
             "transcription_provider": config.DEFAULT_TRANSCRIPTION_KEY,
             "mode": "chat",  # "chat" veya "image"
             "image_provider": config.DEFAULT_IMAGE_PROVIDER_KEY,
+            "last_analysis": None,  # en son görsel analizi (Word/Excel'e aktarmak için)
             "history": [],
         }
     return _sessions[user_id]
