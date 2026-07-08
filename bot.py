@@ -8,7 +8,10 @@ Komutlar:
 
 Akış:
 /menu -> kategori seç -> (sohbet AI için) model seç -> açıklama + onay -> sohbete başla
-Her AI cevabının altında: 💾 Kaydet  🗑️ Hafızayı Temizle butonları.
+🔄 Başka bir yapay zekaya yönlendir -> direkt model listesi -> tek tıkla aktif olur.
+Bir mesaj hata yüzünden cevaplanamadıysa, model değiştirince o mesaj otomatik
+olarak yeni modele sorulur (tekrar yazmaya gerek kalmaz).
+Her AI cevabının altında: 💾 Kaydet  🗑️ Hafızayı Temizle  🔄 Yönlendir butonları.
 """
 import logging
 import threading
@@ -23,7 +26,6 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from telegram.constants import ParseMode
 
 import config
 import storage
@@ -63,19 +65,21 @@ def start_health_server():
     logger.info(f"Health check sunucusu port {config.HEALTH_CHECK_PORT} üzerinde çalışıyor.")
 
 
-# ==================== Yardımcılar ====================
+# ==================== Yardımcı: uzun mesaj gönderme ====================
 
-async def send_long_message(update: Update, text: str, reply_markup=None):
+async def send_long_text(bot, chat_id: int, text: str, reply_markup=None):
     """Telegram'ın 4096 karakter sınırını aşan mesajları parçalara böler."""
     if not text:
         text = "(boş cevap alındı)"
     chunks = [text[i:i + TELEGRAM_MESSAGE_LIMIT] for i in range(0, len(text), TELEGRAM_MESSAGE_LIMIT)]
     for i, chunk in enumerate(chunks):
         is_last = i == len(chunks) - 1
-        await update.effective_message.reply_text(
-            chunk, reply_markup=reply_markup if is_last else None
+        await bot.send_message(
+            chat_id=chat_id, text=chunk, reply_markup=reply_markup if is_last else None
         )
 
+
+# ==================== Butonlar ====================
 
 def switch_button() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -102,6 +106,7 @@ def category_menu() -> InlineKeyboardMarkup:
 
 
 def provider_menu(category_key: str) -> InlineKeyboardMarkup:
+    """İlk seçim akışı: tıklanınca açıklama + onay ekranı gelir."""
     cat = config.CATEGORIES[category_key]
     buttons = [
         [InlineKeyboardButton(config.PROVIDERS[p]["label"], callback_data=f"prov:{p}")]
@@ -126,6 +131,66 @@ def confirm_menu(provider_key: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✅ Bu modelle sohbete başla", callback_data=f"use:{provider_key}")],
         [InlineKeyboardButton("⬅️ Geri", callback_data="cat:chat")],
     ])
+
+
+# ==================== Ortak: AI'dan cevap üretip gönderme ====================
+
+async def generate_and_deliver(bot, chat_id: int, user_id: int, user_message: str,
+                                context_history: list, provider_key: str):
+    """
+    Verilen mesaja seçilen sağlayıcıdan cevap üretir ve kullanıcıya gönderir.
+    NOT: user_message'ın hafızaya kaydedilmesi bu fonksiyonun DIŞINDA yapılmış olmalı
+    (çağıran taraf sorumludur) - burada sadece başarılı cevap hafızaya eklenir.
+    """
+    try:
+        adapter = get_adapter(provider_key)
+        reply = adapter.generate(context_history, user_message)
+    except ProviderError as e:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"⚠️ {config.PROVIDERS[provider_key]['label']} şu an cevap veremedi:\n{e}",
+            reply_markup=switch_button(),
+        )
+        return
+    except Exception as e:
+        logger.exception("Beklenmeyen hata")
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"⚠️ Beklenmeyen bir hata oluştu: {e}",
+            reply_markup=switch_button(),
+        )
+        return
+
+    storage.append_message(user_id, "assistant", reply)
+    await send_long_text(bot, chat_id, reply, reply_markup=memory_buttons())
+
+
+async def activate_provider_and_continue(query, context, provider_key: str):
+    """
+    Bir modeli aktif eder. Eğer hafızada cevaplanmamış (bir önceki modelin
+    hata verdiği) bir kullanıcı mesajı varsa, onu tekrar yazdırmadan otomatik
+    olarak yeni modele sorar.
+    """
+    user_id = query.from_user.id
+    chat_id = query.message.chat_id
+    storage.set_provider(user_id, provider_key)
+    label = config.PROVIDERS[provider_key]["label"]
+
+    session = storage.get_session(user_id)
+    history = session["history"]
+
+    pending_message = None
+    context_history = history
+    if history and history[-1]["role"] == "user":
+        pending_message = history[-1]["content"]
+        context_history = history[:-1]
+
+    if pending_message:
+        await query.edit_message_text(f"✅ Aktif model: {label}\n\nÖnceki mesajını bu modele soruyorum...")
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        await generate_and_deliver(context.bot, chat_id, user_id, pending_message, context_history, provider_key)
+    else:
+        await query.edit_message_text(f"✅ Aktif model: {label}\n\nŞimdi bana mesaj yazabilirsin!")
 
 
 # ==================== Komutlar ====================
@@ -188,11 +253,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("use:"):
         provider_key = data.split(":", 1)[1]
-        storage.set_provider(query.from_user.id, provider_key)
-        label = config.PROVIDERS[provider_key]["label"]
-        await query.edit_message_text(
-            f"✅ Aktif model: {label}\n\nŞimdi bana mesaj yazabilirsin!"
-        )
+        await activate_provider_and_continue(query, context, provider_key)
         return
 
     if data == "mem:save":
@@ -217,11 +278,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("switchuse:"):
         provider_key = data.split(":", 1)[1]
-        storage.set_provider(query.from_user.id, provider_key)
-        label = config.PROVIDERS[provider_key]["label"]
-        await query.edit_message_text(
-            f"✅ Aktif model: {label}\n\nKaldığın yerden devam edebilirsin, mesaj yaz!"
-        )
+        await activate_provider_and_continue(query, context, provider_key)
         return
 
 
@@ -229,32 +286,18 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     session = storage.get_session(user_id)
     provider_key = session["provider"]
     user_message = update.message.text
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-
-    try:
-        adapter = get_adapter(provider_key)
-        reply = adapter.generate(session["history"], user_message)
-    except ProviderError as e:
-        await update.message.reply_text(
-            f"⚠️ {config.PROVIDERS[provider_key]['label']} şu an cevap veremedi:\n{e}",
-            reply_markup=switch_button(),
-        )
-        return
-    except Exception as e:
-        logger.exception("Beklenmeyen hata")
-        await update.message.reply_text(
-            f"⚠️ Beklenmeyen bir hata oluştu: {e}", reply_markup=switch_button()
-        )
-        return
-
+    # Mesajı hafızaya HEMEN kaydediyoruz (cevap gelmeden önce) — böylece model
+    # hata verse bile mesaj kaybolmaz ve model değiştirince otomatik sorulabilir.
+    context_history = list(session["history"])
     storage.append_message(user_id, "user", user_message)
-    storage.append_message(user_id, "assistant", reply)
 
-    await send_long_message(update, reply, reply_markup=memory_buttons())
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    await generate_and_deliver(context.bot, chat_id, user_id, user_message, context_history, provider_key)
 
 
 # ==================== Uygulama başlatma ====================
