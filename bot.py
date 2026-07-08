@@ -111,6 +111,16 @@ def provider_menu(category_key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+def quick_switch_menu(category_key: str) -> InlineKeyboardMarkup:
+    """Yönlendirme akışı: tıklanınca açıklama/onay olmadan direkt o modele geçer."""
+    cat = config.CATEGORIES[category_key]
+    buttons = [
+        [InlineKeyboardButton(config.PROVIDERS[p]["label"], callback_data=f"switchuse:{p}")]
+        for p in cat["providers"]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
 def confirm_menu(provider_key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Bu modelle sohbete başla", callback_data=f"use:{provider_key}")],
@@ -201,7 +211,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "switch:menu":
         await query.message.reply_text(
             "Hangi yapay zekaya geçmek istersin?",
-            reply_markup=provider_menu("chat"),
+            reply_markup=quick_switch_menu("chat"),
+        )
+        return
+
+    if data.startswith("switchuse:"):
+        provider_key = data.split(":", 1)[1]
+        storage.set_provider(query.from_user.id, provider_key)
+        label = config.PROVIDERS[provider_key]["label"]
+        await query.edit_message_text(
+            f"✅ Aktif model: {label}\n\nKaldığın yerden devam edebilirsin, mesaj yaz!"
         )
         return
 
