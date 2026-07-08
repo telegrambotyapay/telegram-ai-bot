@@ -38,10 +38,11 @@ from image_gen import (
     generate_pollinations_image,
     generate_gemini_image,
     generate_agnes_image,
-    generate_fal_image,
     generate_json2video,
+    analyze_image_gemini,
     ImageGenError,
 )
+from document_export import create_docx, create_xlsx
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -429,6 +430,70 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(audio_path)
         return
 
+    if data in ("export:docx", "export:xlsx"):
+        user_id = query.from_user.id
+        chat_id = query.message.chat_id
+        session = storage.get_session(user_id)
+        analysis = session.get("last_analysis")
+        if not analysis:
+            await query.answer(text="Aktarılacak bir analiz bulunamadı.", show_alert=True)
+            return
+        try:
+            if data == "export:docx":
+                file_path = create_docx("Görsel Analizi", analysis)
+            else:
+                file_path = create_xlsx("Görsel Analizi", analysis)
+        except Exception as e:
+            logger.exception("Dosya oluşturma hatası")
+            await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Dosya oluşturulamadı: {e}")
+            return
+        try:
+            with open(file_path, "rb") as f:
+                await context.bot.send_document(chat_id=chat_id, document=f)
+        finally:
+            os.remove(file_path)
+        return
+
+
+# ==================== Fotoğraf mesajları (görsel analizi) ====================
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    if not config.GOOGLE_AI_STUDIO_API_KEY:
+        await update.message.reply_text(
+            "⚠️ Görsel analizi için GOOGLE_AI_STUDIO_API_KEY gerekiyor, tanımlı değil."
+        )
+        return
+
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+    photo_file = await update.message.photo[-1].get_file()
+    image_bytes = bytes(await photo_file.download_as_bytearray())
+    caption = update.message.caption  # kullanıcı özel bir soru/talimat eklediyse (örn. "bu faturayı oku")
+
+    try:
+        analysis = analyze_image_gemini(image_bytes, instruction=caption)
+    except ImageGenError as e:
+        await update.message.reply_text(f"⚠️ Görsel analiz edilemedi:\n{e}")
+        return
+    except Exception as e:
+        logger.exception("Görsel analizinde beklenmeyen hata")
+        await update.message.reply_text(f"⚠️ Beklenmeyen bir hata oluştu: {e}")
+        return
+
+    session = storage.get_session(user_id)
+    session["last_analysis"] = analysis  # dışa aktarma butonları için sakla
+
+    export_buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📄 Word'e Aktar", callback_data="export:docx"),
+            InlineKeyboardButton("📊 Excel'e Aktar", callback_data="export:xlsx"),
+        ]
+    ])
+    await send_long_text(context.bot, chat_id, f"🔍 {analysis}", reply_markup=export_buttons)
+
 
 # ==================== Metin mesajları ====================
 
@@ -448,8 +513,6 @@ async def handle_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
             content = generate_gemini_image(prompt)
         elif provider_key == "agnes_image":
             content = generate_agnes_image(prompt)
-        elif provider_key == "fal":
-            content = generate_fal_image(prompt)
         elif provider_key == "json2video":
             content = generate_json2video(prompt)
         else:
@@ -548,6 +611,7 @@ def main():
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CallbackQueryHandler(callback_router))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     logger.info("Bot başlatılıyor...")
