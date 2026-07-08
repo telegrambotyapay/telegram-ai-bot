@@ -38,7 +38,7 @@ PROVIDERS = {
         ),
         "adapter_type": "gemini",
         "api_key_env": "GOOGLE_AI_STUDIO_API_KEY",
-        "model_name": "gemini-2.0-flash",
+        "model_name": "gemini-2.5-flash",
     },
     "groq": {
         "label": "⚡ Groq",
