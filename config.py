@@ -47,7 +47,6 @@ DEFAULT_TRANSCRIPTION_KEY = "auto"
 
 # ---------------- Görsel/Video servisleri ----------------
 GOOGLE_AI_STUDIO_API_KEY = os.getenv("GOOGLE_AI_STUDIO_API_KEY", "")
-FAL_API_KEY = os.getenv("FAL_API_KEY", "")
 JSON2VIDEO_API_KEY = os.getenv("JSON2VIDEO_API_KEY", "")
 AGNES_API_KEY = os.getenv("AGNES_API_KEY", "")
 
@@ -72,11 +71,6 @@ IMAGE_PROVIDERS = {
             "Aynı Agnes anahtarıyla görsel üretimi. Ücretsiz ama yeni bir "
             "servis, çıktı kalitesi değişken olabilir."
         ),
-        "kind": "image",
-    },
-    "fal": {
-        "label": "🖼️ Fal.ai",
-        "description": "Flux modeliyle hızlı, yüksek kaliteli AI görsel üretimi.",
         "kind": "image",
     },
     "json2video": {
@@ -201,6 +195,10 @@ CATEGORIES = {
             "Bir servis seçtiğinde, göndereceğin her mesaj o servise bir "
             "üretim isteği (prompt) olarak gidecek ve sana görsel/video "
             "olarak dönecek.\n\n"
+            "🔍 Ayrıca istediğin an (hangi modda olursan ol) bana bir "
+            "FOTOĞRAF gönderebilirsin — otomatik olarak analiz edip "
+            "içeriğini anlatırım, istersen Word veya Excel dosyası olarak "
+            "da indirebilirsin.\n\n"
             "Sohbet moduna geri dönmek için /menu → 🤖 Sohbet AI'dan "
             "bir model seçmen yeterli."
         ),
