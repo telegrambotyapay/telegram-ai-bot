@@ -22,6 +22,10 @@ HEALTH_CHECK_PORT = int(os.getenv("PORT", "10000"))
 # ---------------- Konuşma hafızası ayarları ----------------
 MAX_HISTORY_MESSAGES = 20  # Bağlam olarak modele gönderilecek son N mesaj
 
+# ---------------- Ses servisleri ----------------
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY", "")
+
 # ---------------- Sağlayıcı adapter tipleri ----------------
 # openai_compatible : OpenAI'nin /chat/completions formatını taklit eden servisler
 #                      (Groq, Cerebras, SambaNova, Mistral, Hugging Face router)
@@ -122,7 +126,16 @@ CATEGORIES = {
         "label": "🎙️ Ses İşlemleri",
         "description": "Sesli mesaj yazıya çevirme ve metni sese dönüştürme.",
         "providers": [],
-        "enabled": False,
+        "enabled": True,
+        "info_text": (
+            "Artık istediğin an bana sesli mesaj gönderebilirsin — otomatik "
+            "olarak yazıya çevirip aktif yapay zeka modeline soruyorum, "
+            "cevabı yazılı olarak alıyorsun.\n\n"
+            "Ayrıca her metin cevabının altındaki 🔊 Sesli Dinle butonuyla, "
+            "cevabı sesli mesaj olarak da dinleyebilirsin.\n\n"
+            "Hangi yapay zekanın cevap vereceği her zaman 🤖 Sohbet AI "
+            "kategorisinden seçtiğin aktif modele göre belirlenir."
+        ),
     },
     "tools": {
         "label": "🔍 Bilgi & Araçlar",
