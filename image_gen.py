@@ -58,6 +58,32 @@ def generate_gemini_image(prompt: str) -> bytes:
         raise ImageGenError(f"Gemini görsel üretimi başarısız: {e}") from e
 
 
+def generate_agnes_image(prompt: str) -> bytes:
+    if not config.AGNES_API_KEY:
+        raise ImageGenError("AGNES_API_KEY tanımlı değil.")
+    try:
+        resp = requests.post(
+            "https://apihub.agnes-ai.com/v1/images/generations",
+            headers={"Authorization": f"Bearer {config.AGNES_API_KEY}"},
+            json={"model": "agnes-image-2.1-flash", "prompt": prompt, "size": "1024x1024"},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        item = data["data"][0]
+        if item.get("b64_json"):
+            return base64.b64decode(item["b64_json"])
+        if item.get("url"):
+            img_resp = requests.get(item["url"], timeout=60)
+            img_resp.raise_for_status()
+            return img_resp.content
+        raise ImageGenError("Agnes cevabında görsel verisi bulunamadı.")
+    except ImageGenError:
+        raise
+    except Exception as e:
+        raise ImageGenError(f"Agnes görsel üretimi başarısız: {e}") from e
+
+
 def generate_fal_image(prompt: str) -> bytes:
     if not config.FAL_API_KEY:
         raise ImageGenError("FAL_API_KEY tanımlı değil.")
