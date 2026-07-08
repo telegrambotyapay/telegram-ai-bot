@@ -71,8 +71,24 @@ def _transcribe_assemblyai(audio_bytes: bytes) -> str:
     raise VoiceError("AssemblyAI zaman aşımına uğradı (60 saniye).")
 
 
-def transcribe(audio_bytes: bytes) -> str:
-    """Deepgram'ı dener, o başarısız/tanımsızsa AssemblyAI'a düşer."""
+def transcribe(audio_bytes: bytes, preferred: str = "auto") -> str:
+    """
+    Sesli mesajı yazıya çevirir.
+    preferred: "auto" (Deepgram dener, olmazsa AssemblyAI'a düşer),
+               "deepgram" (sadece Deepgram, düşme yok),
+               "assemblyai" (sadece AssemblyAI, düşme yok).
+    """
+    if preferred == "deepgram":
+        if not config.DEEPGRAM_API_KEY:
+            raise VoiceError("Deepgram seçili ama DEEPGRAM_API_KEY tanımlı değil.")
+        return _transcribe_deepgram(audio_bytes)
+
+    if preferred == "assemblyai":
+        if not config.ASSEMBLYAI_API_KEY:
+            raise VoiceError("AssemblyAI seçili ama ASSEMBLYAI_API_KEY tanımlı değil.")
+        return _transcribe_assemblyai(audio_bytes)
+
+    # auto: önce Deepgram, olmazsa AssemblyAI
     if config.DEEPGRAM_API_KEY:
         try:
             return _transcribe_deepgram(audio_bytes)
