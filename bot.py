@@ -110,6 +110,10 @@ def memory_buttons() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🔊 Sesli Dinle", callback_data="tts:speak"),
             InlineKeyboardButton("🔄 Yönlendir", callback_data="switch:menu"),
         ],
+        [
+            InlineKeyboardButton("📄 Word'e Aktar", callback_data="export:docx"),
+            InlineKeyboardButton("📊 Excel'e Aktar", callback_data="export:xlsx"),
+        ],
     ])
 
 
@@ -214,6 +218,7 @@ async def generate_and_deliver(bot, chat_id: int, user_id: int, user_message: st
         return
 
     storage.append_message(user_id, "assistant", reply)
+    storage.get_session(user_id)["last_analysis"] = reply  # Word/Excel'e aktarmak için
     await send_long_text(bot, chat_id, reply, reply_markup=memory_buttons())
 
 
@@ -596,6 +601,28 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await generate_and_deliver(context.bot, chat_id, user_id, transcript, context_history, provider_key)
 
 
+# ==================== Genel hata koruması ====================
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Herhangi bir handler'da yakalanmamış bir hata oluşursa devreye girer.
+    Bu olmadan bot sessizce takılıp kalır, kullanıcı hiçbir şey görmez.
+    """
+    logger.error(f"Beklenmeyen hata: {context.error}", exc_info=context.error)
+    try:
+        if isinstance(update, Update) and update.effective_chat:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    "⚠️ Beklenmeyen bir hata oluştu. Tekrar dener misin? "
+                    "Sorun devam ederse başka bir yapay zekaya geçebilirsin."
+                ),
+                reply_markup=switch_button(),
+            )
+    except Exception:
+        logger.exception("Hata mesajı gönderilirken de hata oluştu")
+
+
 # ==================== Uygulama başlatma ====================
 
 def main():
@@ -613,6 +640,7 @@ def main():
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_error_handler(error_handler)
 
     logger.info("Bot başlatılıyor...")
     app.run_polling()
