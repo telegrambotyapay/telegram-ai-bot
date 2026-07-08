@@ -45,6 +45,42 @@ TRANSCRIPTION_PROVIDERS = {
 }
 DEFAULT_TRANSCRIPTION_KEY = "auto"
 
+# ---------------- Görsel/Video servisleri ----------------
+GOOGLE_AI_STUDIO_API_KEY = os.getenv("GOOGLE_AI_STUDIO_API_KEY", "")
+FAL_API_KEY = os.getenv("FAL_API_KEY", "")
+JSON2VIDEO_API_KEY = os.getenv("JSON2VIDEO_API_KEY", "")
+
+IMAGE_PROVIDERS = {
+    "pollinations_image": {
+        "label": "🌸 Pollinations (Görsel)",
+        "description": "API anahtarı gerektirmeyen, hızlı ve tamamen ücretsiz görsel üretimi.",
+        "kind": "image",
+    },
+    "gemini_image": {
+        "label": "🔷 Gemini (Nano Banana)",
+        "description": (
+            "Google Gemini'nin görsel üretme modeli. Aynı Google AI Studio "
+            "anahtarını kullanır, ayrı bir key gerekmez. Genel amaçlı, "
+            "kaliteli görseller üretir."
+        ),
+        "kind": "image",
+    },
+    "fal": {
+        "label": "🖼️ Fal.ai",
+        "description": "Flux modeliyle hızlı, yüksek kaliteli AI görsel üretimi.",
+        "kind": "image",
+    },
+    "json2video": {
+        "label": "🎬 JSON2Video",
+        "description": (
+            "Yazdığın metni basit, başlıklı bir video haline getirir. "
+            "Render işlemi biraz sürebilir (yarım-iki dakika arası)."
+        ),
+        "kind": "video",
+    },
+}
+DEFAULT_IMAGE_PROVIDER_KEY = "pollinations_image"
+
 # ---------------- Sağlayıcı adapter tipleri ----------------
 # openai_compatible : OpenAI'nin /chat/completions formatını taklit eden servisler
 #                      (Groq, Cerebras, SambaNova, Mistral, Hugging Face router)
@@ -138,8 +174,15 @@ CATEGORIES = {
     "image": {
         "label": "🎨 Görsel Üretimi",
         "description": "Metinden görsel/video üretimi.",
-        "providers": [],
-        "enabled": False,
+        "providers": list(IMAGE_PROVIDERS.keys()),
+        "enabled": True,
+        "info_text": (
+            "Bir servis seçtiğinde, göndereceğin her mesaj o servise bir "
+            "üretim isteği (prompt) olarak gidecek ve sana görsel/video "
+            "olarak dönecek.\n\n"
+            "Sohbet moduna geri dönmek için /menu → 🤖 Sohbet AI'dan "
+            "bir model seçmen yeterli."
+        ),
     },
     "voice": {
         "label": "🎙️ Ses İşlemleri",
