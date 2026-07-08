@@ -49,6 +49,7 @@ DEFAULT_TRANSCRIPTION_KEY = "auto"
 GOOGLE_AI_STUDIO_API_KEY = os.getenv("GOOGLE_AI_STUDIO_API_KEY", "")
 FAL_API_KEY = os.getenv("FAL_API_KEY", "")
 JSON2VIDEO_API_KEY = os.getenv("JSON2VIDEO_API_KEY", "")
+AGNES_API_KEY = os.getenv("AGNES_API_KEY", "")
 
 IMAGE_PROVIDERS = {
     "pollinations_image": {
@@ -62,6 +63,14 @@ IMAGE_PROVIDERS = {
             "Google Gemini'nin görsel üretme modeli. Aynı Google AI Studio "
             "anahtarını kullanır, ayrı bir key gerekmez. Genel amaçlı, "
             "kaliteli görseller üretir."
+        ),
+        "kind": "image",
+    },
+    "agnes_image": {
+        "label": "🐦 Agnes AI (Görsel)",
+        "description": (
+            "Aynı Agnes anahtarıyla görsel üretimi. Ücretsiz ama yeni bir "
+            "servis, çıktı kalitesi değişken olabilir."
         ),
         "kind": "image",
     },
@@ -158,6 +167,18 @@ PROVIDERS = {
         "adapter_type": "pollinations",
         "api_key_env": None,
         "model_name": "openai",
+    },
+    "agnes": {
+        "label": "🐦 Agnes AI",
+        "description": (
+            "Singapur merkezli, süresiz ücretsiz (dakikada 20 istek sınırlı) "
+            "çok yönlü bir yapay zeka. Yeni bir servis olduğu için çıktı "
+            "kalitesi diğerleri kadar tutarlı olmayabilir."
+        ),
+        "adapter_type": "openai_compatible",
+        "api_key_env": "AGNES_API_KEY",
+        "base_url": "https://apihub.agnes-ai.com/v1",
+        "model_name": "agnes-2.0-flash",
     },
 }
 
