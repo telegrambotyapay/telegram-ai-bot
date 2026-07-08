@@ -24,6 +24,7 @@ def get_session(user_id: int) -> Dict:
     if user_id not in _sessions:
         _sessions[user_id] = {
             "provider": config.DEFAULT_PROVIDER_KEY,
+            "transcription_provider": config.DEFAULT_TRANSCRIPTION_KEY,
             "history": [],
         }
     return _sessions[user_id]
@@ -32,6 +33,11 @@ def get_session(user_id: int) -> Dict:
 def set_provider(user_id: int, provider_key: str) -> None:
     session = get_session(user_id)
     session["provider"] = provider_key
+
+
+def set_transcription_provider(user_id: int, provider_key: str) -> None:
+    session = get_session(user_id)
+    session["transcription_provider"] = provider_key
 
 
 def append_message(user_id: int, role: str, content: str) -> None:
