@@ -49,7 +49,11 @@ class OpenAICompatibleAdapter(AIAdapter):
 
     def __init__(self, provider_key: str):
         super().__init__(provider_key)
-        self.client = OpenAI(api_key=self.api_key, base_url=self.info["base_url"])
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.info["base_url"],
+            max_retries=0,
+        )
 
     def generate(self, history, user_message) -> str:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -57,7 +61,7 @@ class OpenAICompatibleAdapter(AIAdapter):
         messages.append({"role": "user", "content": user_message})
 
         last_error = None
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = self.client.chat.completions.create(
                     model=self.info["model_name"],
@@ -68,7 +72,7 @@ class OpenAICompatibleAdapter(AIAdapter):
             except RateLimitError as e:
                 last_error = e
                 logger.warning(f"Rate limit, {attempt + 1}. deneme, bekleniyor...")
-                time.sleep(3 * (attempt + 1))
+                time.sleep(4)
             except Exception as e:
                 logger.exception("OpenAI uyumlu sağlayıcıda hata")
                 raise ProviderError(str(e)) from e
