@@ -37,6 +37,7 @@ from voice import transcribe, synthesize_speech, VoiceError
 from image_gen import (
     generate_pollinations_image,
     generate_gemini_image,
+    generate_agnes_image,
     generate_fal_image,
     generate_json2video,
     ImageGenError,
@@ -445,6 +446,8 @@ async def handle_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
             content = generate_pollinations_image(prompt)
         elif provider_key == "gemini_image":
             content = generate_gemini_image(prompt)
+        elif provider_key == "agnes_image":
+            content = generate_agnes_image(prompt)
         elif provider_key == "fal":
             content = generate_fal_image(prompt)
         elif provider_key == "json2video":
