@@ -26,6 +26,25 @@ MAX_HISTORY_MESSAGES = 20  # Bağlam olarak modele gönderilecek son N mesaj
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY", "")
 
+TRANSCRIPTION_PROVIDERS = {
+    "auto": {
+        "label": "⚙️ Otomatik (önce Deepgram, olmazsa AssemblyAI)",
+        "description": (
+            "Ekstra ayar gerektirmez. Önce Deepgram'ı dener, o başarısız "
+            "olursa otomatik olarak AssemblyAI'a geçer."
+        ),
+    },
+    "deepgram": {
+        "label": "🟣 Deepgram",
+        "description": "Tek istekle çalışan, hızlı bir konuşma tanıma servisi.",
+    },
+    "assemblyai": {
+        "label": "🔵 AssemblyAI",
+        "description": "Yükle-ve-bekle mantığıyla çalışan, güvenilir bir konuşma tanıma servisi.",
+    },
+}
+DEFAULT_TRANSCRIPTION_KEY = "auto"
+
 # ---------------- Sağlayıcı adapter tipleri ----------------
 # openai_compatible : OpenAI'nin /chat/completions formatını taklit eden servisler
 #                      (Groq, Cerebras, SambaNova, Mistral, Hugging Face router)
@@ -128,13 +147,15 @@ CATEGORIES = {
         "providers": [],
         "enabled": True,
         "info_text": (
-            "Artık istediğin an bana sesli mesaj gönderebilirsin — otomatik "
+            "İstediğin an bana sesli mesaj gönderebilirsin — otomatik "
             "olarak yazıya çevirip aktif yapay zeka modeline soruyorum, "
             "cevabı yazılı olarak alıyorsun.\n\n"
             "Ayrıca her metin cevabının altındaki 🔊 Sesli Dinle butonuyla, "
             "cevabı sesli mesaj olarak da dinleyebilirsin.\n\n"
             "Hangi yapay zekanın cevap vereceği her zaman 🤖 Sohbet AI "
-            "kategorisinden seçtiğin aktif modele göre belirlenir."
+            "kategorisinden seçtiğin aktif modele göre belirlenir. "
+            "Aşağıdan da sesli mesajları hangi servisin yazıya çevireceğini "
+            "seçebilirsin:"
         ),
     },
     "tools": {
