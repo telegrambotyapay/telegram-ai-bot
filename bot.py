@@ -41,6 +41,7 @@ from image_gen import (
     ImageGenError,
 )
 from document_export import create_docx, create_xlsx
+from file_reader import read_file, FileReadError
 from tools import (
     get_weather,
     get_exchange_rate,
@@ -129,6 +130,9 @@ def category_menu() -> InlineKeyboardMarkup:
     for key, cat in config.CATEGORIES.items():
         label = cat["label"] if cat["enabled"] else f"{cat['label']} (🚧 yakında)"
         buttons.append([InlineKeyboardButton(label, callback_data=f"cat:{key}")])
+    buttons.append(
+        [InlineKeyboardButton("🧹 Tüm Hafızayı ve Ayarları Sıfırla", callback_data="reset:all")]
+    )
     return InlineKeyboardMarkup(buttons)
 
 
@@ -327,8 +331,8 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    storage.clear_all_memory(update.effective_user.id)
-    await update.message.reply_text("Hafızan tamamen temizlendi. 🧹")
+    storage.full_reset(update.effective_user.id)
+    await update.message.reply_text("Hafızan ve tüm ayarların (aktif model, mod) varsayılana sıfırlandı. 🧹")
 
 
 # ==================== Callback (buton) işleyicileri ====================
@@ -340,6 +344,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "menu:root":
         await query.edit_message_text("Bir kategori seç:", reply_markup=category_menu())
+        return
+
+    if data == "reset:all":
+        storage.full_reset(query.from_user.id)
+        await query.edit_message_text(
+            "🧹 Her şey sıfırlandı! Hafıza temizlendi, tüm yapay zekalar/araçlar "
+            "varsayılana döndü.\n\nBir kategori seç:",
+            reply_markup=category_menu(),
+        )
         return
 
     if data.startswith("cat:"):
@@ -534,6 +547,52 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_long_text(context.bot, chat_id, f"🔍 {analysis}", reply_markup=export_buttons)
 
 
+# ==================== Belge dosyaları (PDF/Word/Excel/CSV/TXT) ====================
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    session = storage.get_session(user_id)
+
+    doc = update.message.document
+    filename = doc.file_name or "dosya"
+
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+    doc_file = await doc.get_file()
+    file_bytes = bytes(await doc_file.download_as_bytearray())
+
+    try:
+        content = read_file(filename, file_bytes)
+    except FileReadError as e:
+        await update.message.reply_text(f"⚠️ Dosya okunamadı:\n{e}")
+        return
+    except Exception as e:
+        logger.exception("Dosya okumada beklenmeyen hata")
+        await update.message.reply_text(f"⚠️ Beklenmeyen bir hata oluştu: {e}")
+        return
+
+    truncated = len(content) > 6000
+    content_for_ai = content[:6000]
+
+    caption = update.message.caption
+    instruction = caption or (
+        f"Bu, kullanıcının yüklediği '{filename}' adlı dosyanın içeriğidir. "
+        "İçeriği özetle, önemli noktaları/verileri belirt. Eğer tablo/liste "
+        "gibi yapılandırılmış veri varsa, düzenli satırlar halinde, mümkünse "
+        "sütunları '|' işaretiyle ayırarak göster."
+    )
+    prompt = f"{instruction}\n\n--- DOSYA İÇERİĞİ ({filename}) ---\n{content_for_ai}"
+    if truncated:
+        prompt += "\n\n(Not: dosya uzun olduğu için sadece ilk kısmı işlendi.)"
+
+    provider_key = session["provider"]
+    context_history = list(session["history"])
+    storage.append_message(user_id, "user", f"[📁 Dosya gönderildi: {filename}]")
+
+    await generate_and_deliver(context.bot, chat_id, user_id, prompt, context_history, provider_key)
+
+
 # ==================== Araç mesajları ====================
 
 async def handle_tool_message(update: Update, context: ContextTypes.DEFAULT_TYPE, session: dict, text: str):
@@ -701,6 +760,7 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_router))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_error_handler(error_handler)
 
