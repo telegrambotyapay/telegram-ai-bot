@@ -6,11 +6,13 @@ from __future__ import annotations
 import os
 import time
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from abc import ABC, abstractmethod
 from typing import List, Dict
 
 import requests
-from openai import OpenAI, RateLimitError
+from openai import OpenAI, RateLimitError, InternalServerError
 
 import config
 
@@ -22,6 +24,17 @@ SYSTEM_PROMPT = (
     "detaylı, gerektiğinde kısa ve net konuş."
 )
 
+_TR_MONTHS = [
+    "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+    "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
+]
+_TR_DAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+
+
+def _today_str_tr() -> str:
+    now = datetime.now(ZoneInfo("Europe/Istanbul"))
+    return f"{now.day} {_TR_MONTHS[now.month - 1]} {now.year}, {_TR_DAYS[now.weekday()]}"
+
 
 class ProviderError(Exception):
     """Sağlayıcıdan cevap alınamadığında fırlatılır."""
@@ -31,7 +44,11 @@ class AIAdapter(ABC):
     def __init__(self, provider_key: str):
         self.provider_key = provider_key
         self.info = config.PROVIDERS[provider_key]
-        self.system_prompt = self.info.get("system_prompt") or SYSTEM_PROMPT
+        base_prompt = self.info.get("system_prompt") or SYSTEM_PROMPT
+        self.system_prompt = (
+            f"{base_prompt}\n\nBugünün tarihi: {_today_str_tr()}. "
+            f"Güncel tarih/zamanla ilgili sorularda bunu esas al."
+        )
         env_name = self.info.get("api_key_env")
         self.api_key = os.getenv(env_name, "") if env_name else ""
         if env_name and not self.api_key:
@@ -70,9 +87,9 @@ class OpenAICompatibleAdapter(AIAdapter):
                     max_tokens=2048,
                 )
                 return response.choices[0].message.content
-            except RateLimitError as e:
+            except (RateLimitError, InternalServerError) as e:
                 last_error = e
-                logger.warning(f"Rate limit, {attempt + 1}. deneme, bekleniyor...")
+                logger.warning(f"Geçici hata (rate limit/sunucu), {attempt + 1}. deneme, bekleniyor...")
                 time.sleep(4)
             except Exception as e:
                 logger.exception("OpenAI uyumlu sağlayıcıda hata")
@@ -100,12 +117,13 @@ class GeminiAdapter(AIAdapter):
             "systemInstruction": {"parts": [{"text": self.system_prompt}]},
         }
         last_error = None
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 resp = requests.post(url, json=payload, timeout=60)
-                if resp.status_code == 429:
-                    last_error = "429 Too Many Requests"
-                    logger.warning(f"Gemini rate limit, {attempt + 1}. deneme...")
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    last_error = f"{resp.status_code} {resp.reason}"
+                    kind = "rate limit" if resp.status_code == 429 else "geçici sunucu hatası"
+                    logger.warning(f"Gemini {kind}, {attempt + 1}. deneme...")
                     time.sleep(3 * (attempt + 1))
                     continue
                 resp.raise_for_status()
@@ -115,7 +133,8 @@ class GeminiAdapter(AIAdapter):
                 logger.exception("Gemini hata")
                 raise ProviderError(str(e)) from e
         raise ProviderError(
-            f"Google AI Studio şu an çok yoğun (rate limit). Birkaç dakika sonra tekrar dene. ({last_error})"
+            f"Google AI Studio şu an geçici olarak yanıt veremiyor (yoğunluk/sunucu hatası). "
+            f"Birkaç dakika sonra tekrar dene. ({last_error})"
         )
 
 
