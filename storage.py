@@ -129,3 +129,15 @@ def clear_cloud_history(user_id: int) -> bool:
 def clear_all_memory(user_id: int) -> None:
     clear_session_history(user_id)
     clear_cloud_history(user_id)
+
+
+def full_reset(user_id: int) -> None:
+    """Hafızayı VE tüm seçili mod/sağlayıcı tercihlerini varsayılana sıfırlar."""
+    clear_all_memory(user_id)
+    session = get_session(user_id)
+    session["provider"] = config.DEFAULT_PROVIDER_KEY
+    session["transcription_provider"] = config.DEFAULT_TRANSCRIPTION_KEY
+    session["mode"] = "chat"
+    session["image_provider"] = config.DEFAULT_IMAGE_PROVIDER_KEY
+    session["active_tool"] = None
+    session["last_analysis"] = None
