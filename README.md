@@ -66,7 +66,21 @@ create table conversations (
 );
 
 create index on conversations (user_id);
+
+create table user_settings (
+    user_id bigint primary key,
+    provider text,
+    transcription_provider text,
+    mode text,
+    image_provider text,
+    active_tool text,
+    active_astrology_feature text,
+    updated_at timestamp with time zone default now()
+);
 ```
+
+Bu ikinci tablo (`user_settings`), hangi model/mod/aracın aktif olduğunu kalıcı olarak
+saklar — Render her yeniden başladığında (deploy) bu bilgi sıfırlanmasın diye.
 
 3. **Project Settings → Data API**'de **Project URL**'i,
    **Project Settings → API Keys**'de **anon/public** key'i kopyala.
