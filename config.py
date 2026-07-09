@@ -376,16 +376,19 @@ CATEGORIES = {
     },
     "reminder": {
         "label": "⏰ Hatırlatıcı",
-        "description": "Adım adım, zamanlı hatırlatma kur.",
+        "description": "Tek seferlik ya da tekrarlayan (günlük/haftalık/aylık) hatırlatma kur.",
         "providers": [],
         "enabled": True,
         "info_text": (
-            "Bana saat kaçta ne hatırlatmamı istediğini adım adım "
-            "soracağım (örn. 15:04). İstersen /hatirlat <SS:DD> <mesaj> "
-            "komutunu da "
-            "doğrudan kullanabilirsin.\n\n"
-            "Not: Bot bu süre içinde yeniden başlarsa (deploy edilirse) "
-            "kurulan hatırlatma kaybolur."
+            "Aşağıdan bir tür seç: tek seferlik, her gün, haftanın belirli "
+            "bir günü, ya da ayın belirli bir günü. Sonra saat ve mesajını "
+            "soracağım.\n\n"
+            "📋 Kurduğun hatırlatıcıları görmek/iptal etmek için "
+            "'Hatırlatıcılarımı Listele/Sil' butonunu kullan.\n\n"
+            "Not: Tek seferlik hatırlatıcılar bot yeniden başlarsa "
+            "(deploy) kaybolur; tekrarlayan (günlük/haftalık/aylık) "
+            "hatırlatıcılar da aynı şekilde bot yeniden başladığında "
+            "sıfırlanır, yeniden kurman gerekir."
         ),
     },
 }
