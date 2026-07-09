@@ -54,10 +54,12 @@ IMAGE_PROVIDERS = {
         "kind": "image",
     },
     "gemini_image": {
-        "label": "🔷 Gemini (Nano Banana)",
+        "label": "🔷 Gemini (Nano Banana 2)",
         "description": (
-            "Google Gemini'nin görsel üretme modeli. Aynı Google AI Studio "
-            "anahtarını kullanır, ayrı bir key gerekmez."
+            "Google Gemini'nin en güncel görsel üretme modeli. Aynı Google "
+            "AI Studio anahtarını kullanır, ayrı bir key gerekmez. "
+            "⚠️ Kaliteli ama ücretsiz kotası dar olabilir, yoğun saatlerde "
+            "rate limit hatası alırsan Pollinations ya da Agnes'i dene."
         ),
         "kind": "image",
     },
@@ -179,7 +181,7 @@ PROVIDERS = {
         ),
         "adapter_type": "gemini",
         "api_key_env": "GOOGLE_AI_STUDIO_API_KEY",
-        "model_name": "gemini-2.5-flash",
+        "model_name": "gemini-3.5-flash",
     },
     "groq": {
         "label": "⚡ Groq",
@@ -263,7 +265,7 @@ PROVIDERS = {
         ),
         "adapter_type": "gemini",
         "api_key_env": "GOOGLE_AI_STUDIO_API_KEY",
-        "model_name": "gemini-2.5-flash",
+        "model_name": "gemini-3.5-flash",
         "system_prompt": (
             "Sen deneyimli, bilgili bir veteriner asistanısın. Kullanıcılara "
             "evcil ve çiftlik hayvanlarının sağlığı, beslenmesi, davranışları "
