@@ -1,13 +1,14 @@
 """
 Astroloji özellikleri:
-- get_horoscope(): günlük/haftalık/aylık burç yorumu (astrology-api.io)
-- get_birth_chart(): doğum haritası (freeastrologyapi.com)
+- get_horoscope(): günlük/haftalık/aylık/yıllık burç yorumu (astrology-api.io)
+- get_birth_chart(): doğum haritası + AI yorumu (freeastrologyapi.com + Gemini)
 """
 import logging
 
 import requests
 
 import config
+from providers import get_adapter, ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +46,13 @@ def _normalize_sign(sign_text: str) -> str:
 
 
 def get_horoscope(sign_text: str, period: str) -> str:
-    """period: 'daily', 'weekly' ya da 'monthly'"""
+    """period: 'daily', 'weekly', 'monthly' ya da 'yearly'"""
     if not config.ASTROLOGY_API_IO_KEY:
         raise AstrologyError("ASTROLOGY_API_IO_KEY tanımlı değil.")
     sign = _normalize_sign(sign_text)
     try:
         resp = requests.post(
-            f"https://api.astrology-api.io/api/v3/horoscope/{period}",
+            f"https://astrology-api.io/api/v1/horoscope/{period}",
             headers={
                 "Authorization": f"Bearer {config.ASTROLOGY_API_IO_KEY}",
                 "Content-Type": "application/json",
@@ -63,12 +64,15 @@ def get_horoscope(sign_text: str, period: str) -> str:
         data = resp.json()
         text = (
             data.get("horoscope") or data.get("content") or data.get("prediction")
-            or data.get("text") or data.get("reading")
+            or data.get("text") or data.get("reading") or data.get("general")
         )
         if isinstance(text, dict):
-            text = text.get("general") or text.get("text") or str(text)
+            text = (
+                text.get("general") or text.get("text") or text.get("paragraph")
+                or text.get("prediction") or str(text)
+            )
         if not text:
-            raise AstrologyError(f"Beklenmeyen cevap formatı, servis değişmiş olabilir.")
+            raise AstrologyError("Beklenmeyen cevap formatı, servis değişmiş olabilir.")
         return str(text)
     except AstrologyError:
         raise
@@ -148,4 +152,23 @@ def get_birth_chart(text: str) -> str:
         degree = p["normDegree"]
         retro = " (Retro)" if str(p.get("isRetro", "")).lower() == "true" else ""
         lines.append(f"• {name}: {sign_name} {degree:.1f}°{retro}")
-    return "\n".join(lines)
+    raw_chart = "\n".join(lines)
+
+    # Ham verileri Gemini'ye yorumlatıyoruz (gerçek hesaplanmış konumlara dayanan bir yorum)
+    try:
+        interpretation_prompt = (
+            "Aşağıda bir kişinin gerçek, hesaplanmış doğum haritası (gezegen "
+            "konumları) var. Bu verilere dayanarak, Türkçe, sıcak ve anlaşılır "
+            "bir astrolojik yorum yaz: genel kişilik eğilimleri, güçlü yönleri, "
+            "dikkat etmesi gerekebilecek noktalar. 4-6 paragraf, abartılı "
+            "kehanetlerden kaçın, dengeli bir üslup kullan.\n\n" + raw_chart
+        )
+        adapter = get_adapter("google")
+        interpretation = adapter.generate([], interpretation_prompt)
+    except (ProviderError, Exception) as e:
+        logger.warning(f"Doğum haritası yorumu üretilemedi: {e}")
+        interpretation = None
+
+    if interpretation:
+        return f"{raw_chart}\n\n— — —\n\n🔮 Yorum:\n{interpretation}"
+    return raw_chart + "\n\n(Not: AI yorumu şu an üretilemedi, sadece ham veriler gösteriliyor.)"
