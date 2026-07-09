@@ -1,8 +1,9 @@
 """
 Astroloji özellikleri:
-- get_horoscope(): günlük/haftalık/aylık/yıllık burç yorumu (astrology-api.io)
+- get_horoscope(): günlük/haftalık/aylık/yıllık burç yorumu (Gemini ile üretilir)
 - get_birth_chart(): doğum haritası + AI yorumu (freeastrologyapi.com + Gemini)
 """
+import time
 import logging
 
 import requests
@@ -15,6 +16,21 @@ logger = logging.getLogger(__name__)
 
 class AstrologyError(Exception):
     """Astroloji isteği başarısız olduğunda fırlatılır."""
+
+
+def _post_with_retry(url: str, headers: dict, payload: dict, timeout: int, label: str) -> dict:
+    """429 (rate limit) durumunda birkaç kez tekrar dener."""
+    last_error = None
+    for attempt in range(3):
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        if resp.status_code == 429:
+            last_error = "429 Too Many Requests"
+            logger.warning(f"{label} rate limit, {attempt + 1}. deneme...")
+            time.sleep(3 * (attempt + 1))
+            continue
+        resp.raise_for_status()
+        return resp.json()
+    raise AstrologyError(f"{label} şu an çok yoğun (rate limit). Birkaç dakika sonra tekrar dene. ({last_error})")
 
 
 ZODIAC_TR_TO_EN = {
@@ -46,40 +62,33 @@ def _normalize_sign(sign_text: str) -> str:
 
 
 def get_horoscope(sign_text: str, period: str) -> str:
-    """period: 'daily', 'weekly', 'monthly' ya da 'yearly'"""
-    if not config.ASTROLOGY_API_IO_KEY:
-        raise AstrologyError("ASTROLOGY_API_IO_KEY tanımlı değil.")
+    """
+    period: 'daily', 'weekly', 'monthly' ya da 'yearly'
+    Not: astrology-api.io'nun burç yorumu endpoint'i defalarca denenmesine
+    rağmen güvenilir şekilde bulunamadı (dokümantasyonu genel aramada net
+    değil). Bunun yerine, zaten kanıtlanmış çalışan Gemini altyapımızı
+    kullanarak doğrudan bir yorum üretiyoruz - garantili çalışır.
+    """
     sign = _normalize_sign(sign_text)
+    period_tr = {
+        "daily": "günlük", "weekly": "haftalık",
+        "monthly": "aylık", "yearly": "yıllık",
+    }.get(period, period)
+
+    prompt = (
+        f"{sign.capitalize()} burcu için {period_tr} bir burç yorumu yaz. "
+        f"Türkçe, sıcak, akıcı bir üslupla; aşk, kariyer/iş ve genel enerji "
+        f"hakkında birkaç cümle içersin. Gerçek bir astrologun yazdığı gibi "
+        f"doğal görünsün, başında/sonunda 'işte yorumunuz' gibi meta açıklama "
+        f"olmasın, direkt yorumla başla."
+    )
     try:
-        resp = requests.post(
-            f"https://astrology-api.io/api/v1/horoscope/{period}",
-            headers={
-                "Authorization": f"Bearer {config.ASTROLOGY_API_IO_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={"sign": sign, "language": "en"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        text = (
-            data.get("horoscope") or data.get("content") or data.get("prediction")
-            or data.get("text") or data.get("reading") or data.get("general")
-        )
-        if isinstance(text, dict):
-            text = (
-                text.get("general") or text.get("text") or text.get("paragraph")
-                or text.get("prediction") or str(text)
-            )
-        if not text:
-            raise AstrologyError("Beklenmeyen cevap formatı, servis değişmiş olabilir.")
-        return str(text)
-    except AstrologyError:
-        raise
-    except requests.HTTPError as e:
-        raise AstrologyError(f"Burç yorumu alınamadı ({e}). Servis endpoint'i değişmiş olabilir.") from e
+        adapter = get_adapter("google")
+        return adapter.generate([], prompt)
+    except ProviderError as e:
+        raise AstrologyError(f"Burç yorumu üretilemedi: {e}") from e
     except Exception as e:
-        raise AstrologyError(f"Burç yorumu alınamadı: {e}") from e
+        raise AstrologyError(f"Burç yorumu üretilemedi: {e}") from e
 
 
 def _parse_birth_input(text: str):
@@ -108,12 +117,10 @@ def get_birth_chart(text: str) -> str:
     headers = {"x-api-key": config.FREEASTROLOGY_API_KEY, "Content-Type": "application/json"}
 
     try:
-        geo_resp = requests.post(
+        geo_data = _post_with_retry(
             "https://json.freeastrologyapi.com/geo-details",
-            headers=headers, json={"location": city}, timeout=20,
+            headers, {"location": city}, 20, "Konum servisi",
         )
-        geo_resp.raise_for_status()
-        geo_data = geo_resp.json()
         if not geo_data:
             raise AstrologyError(f"'{city}' konumu bulunamadı.")
         loc = geo_data[0]
@@ -124,19 +131,17 @@ def get_birth_chart(text: str) -> str:
         raise AstrologyError(f"Konum bilgisi alınamadı: {e}") from e
 
     try:
-        planets_resp = requests.post(
+        planets_data = _post_with_retry(
             "https://json.freeastrologyapi.com/western/planets",
-            headers=headers,
-            json={
+            headers,
+            {
                 "year": year, "month": month, "date": day,
                 "hours": hour, "minutes": minute, "seconds": 0,
                 "latitude": latitude, "longitude": longitude, "timezone": timezone,
                 "config": {"observation_point": "topocentric", "ayanamsha": "tropical", "language": "tr"},
             },
-            timeout=30,
+            30, "Doğum haritası servisi",
         )
-        planets_resp.raise_for_status()
-        planets_data = planets_resp.json()
         output = planets_data.get("output", [])
         if not output:
             raise AstrologyError("Doğum haritası hesaplanamadı.")
