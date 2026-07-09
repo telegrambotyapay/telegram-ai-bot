@@ -37,7 +37,7 @@ def generate_gemini_image(prompt: str) -> bytes:
         raise ImageGenError("GOOGLE_AI_STUDIO_API_KEY tanımlı değil.")
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-3.1-flash-lite-image:generateContent?key={config.GOOGLE_AI_STUDIO_API_KEY}"
+        f"gemini-3.1-flash-image:generateContent?key={config.GOOGLE_AI_STUDIO_API_KEY}"
     )
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -161,7 +161,7 @@ def analyze_image_gemini(image_bytes: bytes, instruction: str = None, mime_type:
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={config.GOOGLE_AI_STUDIO_API_KEY}"
+        f"gemini-3.5-flash:generateContent?key={config.GOOGLE_AI_STUDIO_API_KEY}"
     )
     payload = {
         "contents": [{
