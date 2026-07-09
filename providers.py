@@ -31,6 +31,7 @@ class AIAdapter(ABC):
     def __init__(self, provider_key: str):
         self.provider_key = provider_key
         self.info = config.PROVIDERS[provider_key]
+        self.system_prompt = self.info.get("system_prompt") or SYSTEM_PROMPT
         env_name = self.info.get("api_key_env")
         self.api_key = os.getenv(env_name, "") if env_name else ""
         if env_name and not self.api_key:
@@ -56,7 +57,7 @@ class OpenAICompatibleAdapter(AIAdapter):
         )
 
     def generate(self, history, user_message) -> str:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(history)
         messages.append({"role": "user", "content": user_message})
 
@@ -96,7 +97,7 @@ class GeminiAdapter(AIAdapter):
         )
         payload = {
             "contents": contents,
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+            "systemInstruction": {"parts": [{"text": self.system_prompt}]},
         }
         last_error = None
         for attempt in range(3):
@@ -122,7 +123,7 @@ class CohereAdapter(AIAdapter):
     """Cohere v2 Chat API."""
 
     def generate(self, history, user_message) -> str:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": self.system_prompt}]
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": user_message})
@@ -145,7 +146,7 @@ class PollinationsAdapter(AIAdapter):
     """API anahtarı gerektirmez."""
 
     def generate(self, history, user_message) -> str:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(history)
         messages.append({"role": "user", "content": user_message})
         try:
