@@ -47,6 +47,23 @@ def create_xlsx(title: str, content: str) -> str:
     return tmp.name
 
 
+def _break_long_words(text: str, max_word_len: int = 60) -> str:
+    """
+    Boşluk içermeyen çok uzun diziler (uzun linkler, hash'ler vb.) PDF satır
+    kaydırma motorunu çökertebiliyor ("Not enough horizontal space..." hatası).
+    Bu tür kelimeleri belirli aralıklarla bölerek bu hatayı önlüyoruz.
+    """
+    words = text.split(" ")
+    fixed_words = []
+    for word in words:
+        if len(word) > max_word_len:
+            chunks = [word[i:i + max_word_len] for i in range(0, len(word), max_word_len)]
+            fixed_words.append(" ".join(chunks))
+        else:
+            fixed_words.append(word)
+    return " ".join(fixed_words)
+
+
 def create_pdf(title: str, content: str) -> str:
     """Metni başlıklı bir PDF'e yazar, geçici dosya yolunu döner."""
     pdf = FPDF()
@@ -59,16 +76,24 @@ def create_pdf(title: str, content: str) -> str:
         return text.encode("latin-1", errors="replace").decode("latin-1")
 
     pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(0, 10, safe(title))
+    pdf.multi_cell(0, 10, safe(_break_long_words(title)))
     pdf.ln(4)
 
     pdf.set_font("Helvetica", "", 11)
     for line in content.split("\n"):
         line = line.strip()
-        if line:
-            pdf.multi_cell(0, 7, safe(line))
-        else:
+        if not line:
             pdf.ln(3)
+            continue
+        try:
+            pdf.multi_cell(0, 7, safe(_break_long_words(line)))
+        except Exception:
+            # Bu satır her ne sebeple olursa olsun render edilemedi,
+            # tüm PDF'i çökertmek yerine kısaltılmış haliyle devam et.
+            try:
+                pdf.multi_cell(0, 7, safe(_break_long_words(line))[:80] + " [...]")
+            except Exception:
+                pass
 
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     tmp.close()
