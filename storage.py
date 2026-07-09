@@ -23,6 +23,7 @@ def get_session(user_id: int) -> Dict:
             "mode": "chat",
             "image_provider": config.DEFAULT_IMAGE_PROVIDER_KEY,
             "active_tool": None,
+            "active_astrology_feature": None,
             "last_analysis": None,
             "history": [],
         }
@@ -43,6 +44,10 @@ def set_image_provider(user_id: int, provider_key: str) -> None:
 
 def set_active_tool(user_id: int, tool_key: str) -> None:
     get_session(user_id)["active_tool"] = tool_key
+
+
+def set_active_astrology_feature(user_id: int, feature_key: str) -> None:
+    get_session(user_id)["active_astrology_feature"] = feature_key
 
 
 def set_transcription_provider(user_id: int, provider_key: str) -> None:
@@ -140,4 +145,5 @@ def full_reset(user_id: int) -> None:
     session["mode"] = "chat"
     session["image_provider"] = config.DEFAULT_IMAGE_PROVIDER_KEY
     session["active_tool"] = None
+    session["active_astrology_feature"] = None
     session["last_analysis"] = None
