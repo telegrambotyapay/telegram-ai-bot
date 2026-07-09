@@ -120,6 +120,32 @@ TOOL_PROVIDERS = {
     },
 }
 
+# ---------------- Astroloji servisleri ----------------
+ASTROLOGY_API_IO_KEY = os.getenv("ASTROLOGY_API_IO_KEY", "")
+FREEASTROLOGY_API_KEY = os.getenv("FREEASTROLOGY_API_KEY", "")
+
+ASTROLOGY_FEATURES = {
+    "daily": {
+        "label": "☀️ Günlük Burç Yorumu",
+        "description": "Burcunu yaz (örn. 'Koç'), günlük yorumunu getireyim.",
+    },
+    "weekly": {
+        "label": "📅 Haftalık Burç Yorumu",
+        "description": "Burcunu yaz, haftalık yorumunu getireyim.",
+    },
+    "monthly": {
+        "label": "🗓️ Aylık Burç Yorumu",
+        "description": "Burcunu yaz, aylık yorumunu getireyim.",
+    },
+    "birthchart": {
+        "label": "🌌 Doğum Haritası",
+        "description": (
+            "Doğum tarihi, saati ve yerini şu formatta yaz:\n"
+            "GG.AA.YYYY SS:DD Şehir\nÖrnek: 15.03.1990 14:30 İstanbul"
+        ),
+    },
+}
+
 # ---------------- Sağlayıcı adapter tipleri ----------------
 # openai_compatible : OpenAI'nin /chat/completions formatını taklit eden servisler
 # gemini            : Google AI Studio (Gemini) REST API
@@ -209,6 +235,36 @@ PROVIDERS = {
         "base_url": "https://apihub.agnes-ai.com/v1",
         "model_name": "agnes-2.0-flash",
     },
+    "vet_assistant": {
+        "label": "🐾 Veteriner Asistanı",
+        "description": (
+            "Evcil/çiftlik hayvanlarının sağlığı, beslenmesi, davranışı ve "
+            "bakımı hakkında genel bilgi verir. ⚠️ Gerçek bir veteriner "
+            "hekimin yerini tutmaz — teşhis koymaz, ilaç dozu önermez. "
+            "Ciddi/acil durumlarda seni gerçek bir veterinere yönlendirir."
+        ),
+        "adapter_type": "gemini",
+        "api_key_env": "GOOGLE_AI_STUDIO_API_KEY",
+        "model_name": "gemini-2.5-flash",
+        "system_prompt": (
+            "Sen deneyimli, bilgili bir veteriner asistanısın. Kullanıcılara "
+            "evcil ve çiftlik hayvanlarının sağlığı, beslenmesi, davranışları "
+            "ve genel bakımı hakkında Türkçe, anlaşılır bilgi veriyorsun.\n\n"
+            "ÇOK ÖNEMLİ KURALLAR:\n"
+            "- Sen gerçek bir veteriner hekimin yerini TUTMAZSIN. Kesin teşhis "
+            "koymazsın, reçete/ilaç dozu önermezsin.\n"
+            "- Kullanıcı ciddi ya da acil olabilecek bir belirti tarif ederse "
+            "(nefes darlığı, aşırı kanama, zehirlenme şüphesi, bilinç kaybı, "
+            "şiddetli travma, uzun süreli kusma/ishal vb.) onu HEMEN gerçek "
+            "bir veteriner hekime veya en yakın acil hayvan kliniğine "
+            "yönlendir, bunu cevabının başında belirt.\n"
+            "- Genel bilgilendirme ve ilk yönlendirme yap, ama her zaman "
+            "kesin tanı ve tedavi için gerçek bir veterinere gitmeleri "
+            "gerektiğini hatırlat.\n"
+            "- Emin olmadığın konularda spekülasyon yapmak yerine bunu açıkça "
+            "belirt."
+        ),
+    },
 }
 
 DEFAULT_PROVIDER_KEY = "google"
@@ -279,6 +335,20 @@ CATEGORIES = {
             "yazabilirsin (örn. 'bu tablodaki toplamı hesapla').\n\n"
             "Cevabın altındaki 📄 Word'e Aktar / 📊 Excel'e Aktar butonlarıyla "
             "sonucu indirebilirsin."
+        ),
+    },
+    "astrology": {
+        "label": "🔮 Astroloji",
+        "description": "Burç yorumları ve doğum haritası.",
+        "providers": [],
+        "enabled": True,
+        "info_text": (
+            "Bir özellik seç:\n\n"
+            "☀️/📅/🗓️ Burç yorumları için sadece burcunu yazman yeterli.\n"
+            "🌌 Doğum haritası için tarih, saat ve doğum yerini gireceksin.\n\n"
+            "Not: Bu özellikler ücretsiz ama sınırlı kotaya sahip (burç "
+            "yorumları ayda ~50 istekle sınırlı), çok sık kullanırsan kota "
+            "dolabilir."
         ),
     },
 }
