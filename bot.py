@@ -14,6 +14,7 @@ Fotoğraflar otomatik analiz edilir (Gemini), Word/Excel'e aktarılabilir.
 """
 import os
 import io
+import asyncio
 import uuid as uuid_lib
 import logging
 import threading
@@ -250,7 +251,7 @@ async def generate_and_deliver(bot, chat_id: int, user_id: int, user_message: st
                                 context_history: list, provider_key: str):
     try:
         adapter = get_adapter(provider_key)
-        reply = adapter.generate(context_history, user_message)
+        reply = await asyncio.to_thread(adapter.generate, context_history, user_message)
     except ProviderError as e:
         await bot.send_message(
             chat_id=chat_id,
@@ -788,7 +789,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = query.message.chat_id
         await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
         try:
-            audio_path = synthesize_speech(text_to_speak)
+            audio_path = await asyncio.to_thread(synthesize_speech, text_to_speak)
         except VoiceError as e:
             await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Seslendirme başarısız: {e}")
             return
@@ -809,11 +810,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         try:
             if data == "export:docx":
-                file_path = create_docx("AI Çıktısı", analysis)
+                file_path = await asyncio.to_thread(create_docx, "AI Çıktısı", analysis)
             elif data == "export:xlsx":
-                file_path = create_xlsx("AI Çıktısı", analysis)
+                file_path = await asyncio.to_thread(create_xlsx, "AI Çıktısı", analysis)
             else:
-                file_path = create_pdf("AI Çıktısı", analysis)
+                file_path = await asyncio.to_thread(create_pdf, "AI Çıktısı", analysis)
         except Exception as e:
             logger.exception("Dosya oluşturma hatası")
             await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Dosya oluşturulamadı: {e}")
@@ -839,7 +840,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_file = await update.message.photo[-1].get_file()
         image_bytes = bytes(await photo_file.download_as_bytearray())
         try:
-            result = analyze_face(image_bytes)
+            result = await asyncio.to_thread(analyze_face, image_bytes)
         except ToolError as e:
             await update.message.reply_text(f"⚠️ {e}", reply_markup=switch_button())
             return
@@ -863,7 +864,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = update.message.caption
 
     try:
-        analysis = analyze_image_gemini(image_bytes, instruction=caption)
+        analysis = await asyncio.to_thread(analyze_image_gemini, image_bytes, instruction=caption)
     except ImageGenError as e:
         await update.message.reply_text(f"⚠️ Görsel analiz edilemedi:\n{e}")
         return
@@ -894,7 +895,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_bytes = bytes(await doc_file.download_as_bytearray())
 
     try:
-        content = read_file(filename, file_bytes)
+        content = await asyncio.to_thread(read_file, filename, file_bytes)
     except FileReadError as e:
         await update.message.reply_text(f"⚠️ Dosya okunamadı:\n{e}")
         return
@@ -934,9 +935,9 @@ async def handle_astrology_message(update: Update, context: ContextTypes.DEFAULT
 
     try:
         if feature_key in ("daily", "weekly", "monthly", "yearly"):
-            result = get_horoscope(text, feature_key)
+            result = await asyncio.to_thread(get_horoscope, text, feature_key)
         elif feature_key == "birthchart":
-            result = get_birth_chart(text)
+            result = await asyncio.to_thread(get_birth_chart, text)
         else:
             await update.message.reply_text("⚠️ Bilinmeyen astroloji özelliği, /menu ile tekrar seç.")
             return
@@ -967,7 +968,7 @@ async def handle_tool_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if tool_key == "link_summary":
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
         try:
-            content = fetch_and_extract_url(text)
+            content = await asyncio.to_thread(fetch_and_extract_url, text)
         except ToolError as e:
             await update.message.reply_text(f"⚠️ {e}", reply_markup=switch_button())
             return
@@ -990,17 +991,17 @@ async def handle_tool_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         if tool_key == "weather":
-            result = get_weather(text)
+            result = await asyncio.to_thread(get_weather, text)
         elif tool_key == "exchange":
-            result = get_exchange_rate(text)
+            result = await asyncio.to_thread(get_exchange_rate, text)
         elif tool_key == "wolfram":
-            result = ask_wolfram(text)
+            result = await asyncio.to_thread(ask_wolfram, text)
         elif tool_key == "search":
-            result = web_search_tavily(text)
+            result = await asyncio.to_thread(web_search_tavily, text)
         elif tool_key == "air":
-            result = get_air_quality(text)
+            result = await asyncio.to_thread(get_air_quality, text)
         elif tool_key == "virustotal":
-            result = scan_url_virustotal(text)
+            result = await asyncio.to_thread(scan_url_virustotal, text)
         else:
             await update.message.reply_text("⚠️ Bilinmeyen araç, /menu ile tekrar seç.")
             return
@@ -1028,13 +1029,13 @@ async def handle_image_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         if provider_key == "pollinations_image":
-            content = generate_pollinations_image(prompt)
+            content = await asyncio.to_thread(generate_pollinations_image, prompt)
         elif provider_key == "gemini_image":
-            content = generate_gemini_image(prompt)
+            content = await asyncio.to_thread(generate_gemini_image, prompt)
         elif provider_key == "agnes_image":
-            content = generate_agnes_image(prompt)
+            content = await asyncio.to_thread(generate_agnes_image, prompt)
         elif provider_key == "json2video":
-            content = generate_json2video(prompt)
+            content = await asyncio.to_thread(generate_json2video, prompt)
         else:
             raise ImageGenError("Bilinmeyen görsel/video sağlayıcı.")
     except ImageGenError as e:
@@ -1140,7 +1141,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio_bytes = await voice_file.download_as_bytearray()
 
     try:
-        transcript = transcribe(bytes(audio_bytes), preferred=session.get("transcription_provider", "auto"))
+        transcript = await asyncio.to_thread(
+            transcribe, bytes(audio_bytes), preferred=session.get("transcription_provider", "auto")
+        )
     except VoiceError as e:
         await update.message.reply_text(f"⚠️ Sesli mesaj çözümlenemedi:\n{e}")
         return
