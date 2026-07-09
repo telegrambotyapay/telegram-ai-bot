@@ -2,8 +2,10 @@
 İki katmanlı hafıza:
 1. Oturum hafızası (RAM) - bot çalıştığı sürece her kullanıcının aktif
    konuşması burada tutulur, modele bağlam olarak gönderilir.
-2. Kalıcı hafıza (Supabase) - kullanıcı "💾 Kaydet" butonuna bastığında
-   oturum geçmişi buraya yazılır ve bot yeniden başlasa bile okunur.
+2. Kalıcı hafıza (Supabase) - konuşma geçmişi kullanıcı "💾 Kaydet" butonuna
+   bastığında kaydedilir; hangi model/mod/araç aktif olduğu gibi AYARLAR ise
+   her değiştiğinde OTOMATİK olarak kaydedilir, böylece Render yeniden
+   başlasa (deploy) bile kaldığın yerden devam edersin.
 """
 import logging
 from typing import List, Dict, Optional
@@ -14,44 +16,60 @@ logger = logging.getLogger(__name__)
 
 _sessions: Dict[int, Dict] = {}
 
+_DEFAULTS = {
+    "provider": lambda: config.DEFAULT_PROVIDER_KEY,
+    "transcription_provider": lambda: config.DEFAULT_TRANSCRIPTION_KEY,
+    "mode": lambda: "chat",
+    "image_provider": lambda: config.DEFAULT_IMAGE_PROVIDER_KEY,
+    "active_tool": lambda: None,
+    "active_astrology_feature": lambda: None,
+}
+
 
 def get_session(user_id: int) -> Dict:
     if user_id not in _sessions:
-        _sessions[user_id] = {
-            "provider": config.DEFAULT_PROVIDER_KEY,
-            "transcription_provider": config.DEFAULT_TRANSCRIPTION_KEY,
-            "mode": "chat",
-            "image_provider": config.DEFAULT_IMAGE_PROVIDER_KEY,
-            "active_tool": None,
-            "active_astrology_feature": None,
-            "last_analysis": None,
-            "history": [],
-        }
+        session = {key: default() for key, default in _DEFAULTS.items()}
+        session["last_analysis"] = None
+        session["history"] = []
+
+        saved = _load_settings(user_id)
+        if saved:
+            for key in _DEFAULTS:
+                if saved.get(key) is not None:
+                    session[key] = saved[key]
+
+        _sessions[user_id] = session
     return _sessions[user_id]
 
 
 def set_provider(user_id: int, provider_key: str) -> None:
     get_session(user_id)["provider"] = provider_key
+    _persist_settings(user_id)
 
 
 def set_mode(user_id: int, mode: str) -> None:
     get_session(user_id)["mode"] = mode
+    _persist_settings(user_id)
 
 
 def set_image_provider(user_id: int, provider_key: str) -> None:
     get_session(user_id)["image_provider"] = provider_key
+    _persist_settings(user_id)
 
 
 def set_active_tool(user_id: int, tool_key: str) -> None:
     get_session(user_id)["active_tool"] = tool_key
+    _persist_settings(user_id)
 
 
 def set_active_astrology_feature(user_id: int, feature_key: str) -> None:
     get_session(user_id)["active_astrology_feature"] = feature_key
+    _persist_settings(user_id)
 
 
 def set_transcription_provider(user_id: int, provider_key: str) -> None:
     get_session(user_id)["transcription_provider"] = provider_key
+    _persist_settings(user_id)
 
 
 def append_message(user_id: int, role: str, content: str) -> None:
@@ -64,6 +82,7 @@ def clear_session_history(user_id: int) -> None:
     get_session(user_id)["history"] = []
 
 
+# ---------------- Supabase ----------------
 _supabase_client = None
 _supabase_checked = False
 
@@ -131,6 +150,41 @@ def clear_cloud_history(user_id: int) -> bool:
         return False
 
 
+def _persist_settings(user_id: int) -> None:
+    """Aktif model/mod/araç seçimlerini Supabase'e yazar (deploy sonrası hafıza için)."""
+    client = _get_client()
+    if client is None:
+        return
+    session = _sessions.get(user_id)
+    if session is None:
+        return
+    try:
+        client.table("user_settings").upsert({
+            "user_id": user_id,
+            "provider": session["provider"],
+            "transcription_provider": session["transcription_provider"],
+            "mode": session["mode"],
+            "image_provider": session["image_provider"],
+            "active_tool": session["active_tool"],
+            "active_astrology_feature": session["active_astrology_feature"],
+        }).execute()
+    except Exception:
+        logger.exception("Ayarlar Supabase'e kaydedilirken hata")
+
+
+def _load_settings(user_id: int) -> Optional[dict]:
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        result = client.table("user_settings").select("*").eq("user_id", user_id).execute()
+        if result.data:
+            return result.data[0]
+    except Exception:
+        logger.exception("Ayarlar Supabase'den okunurken hata")
+    return None
+
+
 def clear_all_memory(user_id: int) -> None:
     clear_session_history(user_id)
     clear_cloud_history(user_id)
@@ -147,3 +201,4 @@ def full_reset(user_id: int) -> None:
     session["active_tool"] = None
     session["active_astrology_feature"] = None
     session["last_analysis"] = None
+    _persist_settings(user_id)
