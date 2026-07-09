@@ -380,8 +380,9 @@ CATEGORIES = {
         "providers": [],
         "enabled": True,
         "info_text": (
-            "Bana kaç saat sonra ne hatırlatmamı istediğini adım adım "
-            "soracağım. İstersen /hatirlat <saat> <mesaj> komutunu da "
+            "Bana saat kaçta ne hatırlatmamı istediğini adım adım "
+            "soracağım (örn. 15:04). İstersen /hatirlat <SS:DD> <mesaj> "
+            "komutunu da "
             "doğrudan kullanabilirsin.\n\n"
             "Not: Bot bu süre içinde yeniden başlarsa (deploy edilirse) "
             "kurulan hatırlatma kaybolur."
