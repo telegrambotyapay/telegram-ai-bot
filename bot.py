@@ -14,9 +14,10 @@ Fotoğraflar otomatik analiz edilir (Gemini), Word/Excel'e aktarılabilir.
 """
 import os
 import io
+import uuid as uuid_lib
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -380,7 +381,8 @@ HELP_TEXT = (
     "yüz analizi ve daha fazlası\n"
     "📁 Dosya İşlemleri — PDF/Word/Excel/CSV okuma ve analiz\n"
     "🔮 Astroloji — burç yorumları ve doğum haritası\n"
-    "⏰ Hatırlatıcı — adım adım zamanlı hatırlatma kurma\n\n"
+    "⏰ Hatırlatıcı — tek seferlik / günlük / haftalık / aylık hatırlatma, "
+    "listeleme ve iptal etme\n\n"
     "*Her zaman, hangi modda olursan ol:*\n"
     "🎙️ Sesli mesaj gönderebilirsin (otomatik yazıya çevrilir)\n"
     "📷 Fotoğraf gönderebilirsin (otomatik analiz edilir)\n"
@@ -395,10 +397,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
+WEEKDAY_NAMES_TR = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 
-def _parse_clock_time(text: str) -> datetime:
-    """'15:04' formatını ayrıştırır, sonraki gerçekleşme zamanını (İstanbul saatiyle) döner."""
+def _parse_clock_time(text: str) -> tuple:
+    """'15:04' formatını ayrıştırır, (saat, dakika) döner."""
     text = text.strip()
     try:
         hour_str, minute_str = text.split(":")
@@ -407,29 +410,120 @@ def _parse_clock_time(text: str) -> datetime:
             raise ValueError
     except ValueError:
         raise ValueError("format")
-
-    now = datetime.now(ISTANBUL_TZ)
-    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return target
+    return hour, minute
 
 
-def _schedule_reminder(context: ContextTypes.DEFAULT_TYPE, chat_id: int, target_dt: datetime, message_text: str) -> str:
-    """Hatırlatmayı job_queue'ya ekler, kullanıcıya gösterilecek onay metnini döner."""
+def reminder_type_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔂 Tek Seferlik", callback_data="remind:once")],
+        [InlineKeyboardButton("📆 Her Gün", callback_data="remind:daily")],
+        [InlineKeyboardButton("📅 Haftanın Belirli Günü", callback_data="remind:weekly")],
+        [InlineKeyboardButton("🗓️ Ayın Belirli Günü", callback_data="remind:monthly")],
+        [InlineKeyboardButton("📋 Hatırlatıcılarımı Listele / Sil", callback_data="remind:list")],
+        [InlineKeyboardButton("⬅️ Geri", callback_data="menu:root")],
+    ])
+
+
+def weekday_menu() -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(name, callback_data=f"remwd:{i}")]
+        for i, name in enumerate(WEEKDAY_NAMES_TR)
+    ]
+    buttons.append([InlineKeyboardButton("⬅️ Geri", callback_data="cat:reminder")])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def show_reminder_list(query, context: ContextTypes.DEFAULT_TYPE, as_new_message: bool = False):
+    user_id = query.from_user.id
+    prefix = f"rem_{user_id}_"
+    jobs = [j for j in context.job_queue.jobs() if j.name and j.name.startswith(prefix) and j.enabled]
+
+    if not jobs:
+        text = "📋 Aktif hatırlatıcın yok."
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Geri", callback_data="cat:reminder")]])
+    else:
+        lines = ["📋 Aktif hatırlatıcıların:\n"]
+        buttons = []
+        for j in jobs:
+            display = (j.data or {}).get("display", "?")
+            msg = (j.data or {}).get("message", "")
+            lines.append(f"• {display}: \"{msg}\"")
+            buttons.append([InlineKeyboardButton(f"🗑️ Sil: {display}", callback_data=f"remcancel:{j.name}")])
+        buttons.append([InlineKeyboardButton("⬅️ Geri", callback_data="cat:reminder")])
+        text = "\n".join(lines)
+        markup = InlineKeyboardMarkup(buttons)
+
+    if as_new_message:
+        await query.message.reply_text(text, reply_markup=markup)
+    else:
+        await query.edit_message_text(text, reply_markup=markup)
+
+
+def _schedule_reminder_from_draft(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int, draft: dict, message_text: str
+) -> str:
+    """draft içindeki türe göre uygun job_queue metodunu çağırır, onay metnini döner."""
+    job_name = f"rem_{user_id}_{uuid_lib.uuid4().hex[:8]}"
+    hour, minute = draft["hour"], draft["minute"]
+    rtype = draft["type"]
+
     async def _send_reminder(ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=chat_id, text=f"⏰ Hatırlatma: {message_text}")
 
-    context.job_queue.run_once(_send_reminder, when=target_dt, chat_id=chat_id)
+    footer = "\n\n📋 /menu → ⏰ Hatırlatıcı → Listele/Sil ile daha sonra iptal edebilirsin."
 
-    now = datetime.now(ISTANBUL_TZ)
-    day_word = "bugün" if target_dt.date() == now.date() else "yarın"
-    time_str = target_dt.strftime("%H:%M")
-    return (
-        f'⏰ Tamam, {day_word} saat {time_str}\'te hatırlatacağım: "{message_text}"\n\n'
-        f"Not: Bot bu süre içinde yeniden başlarsa (örn. bir güncelleme deploy edilirse) "
-        f"bu hatırlatma kaybolur."
-    )
+    if rtype == "once":
+        now = datetime.now(ISTANBUL_TZ)
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        display = f"Tek seferlik {target.strftime('%d.%m %H:%M')}"
+        context.job_queue.run_once(
+            _send_reminder, when=target, chat_id=chat_id, name=job_name,
+            data={"message": message_text, "display": display},
+        )
+        day_word = "bugün" if target.date() == now.date() else "yarın"
+        return (
+            f'⏰ Tamam, {day_word} saat {target.strftime("%H:%M")}\'te hatırlatacağım: '
+            f'"{message_text}"\n\nNot: Bot bu süre içinde yeniden başlarsa (deploy) bu hatırlatma kaybolur.'
+        )
+
+    time_obj = dt_time(hour=hour, minute=minute, tzinfo=ISTANBUL_TZ)
+
+    if rtype == "daily":
+        display = f"Her gün {hour:02d}:{minute:02d}"
+        context.job_queue.run_daily(
+            _send_reminder, time=time_obj, chat_id=chat_id, name=job_name,
+            data={"message": message_text, "display": display},
+        )
+        return f'⏰ Tamam, her gün saat {hour:02d}:{minute:02d}\'te hatırlatacağım: "{message_text}"{footer}'
+
+    if rtype == "weekly":
+        weekday = draft["weekday"]
+        display = f"Her {WEEKDAY_NAMES_TR[weekday]} {hour:02d}:{minute:02d}"
+        context.job_queue.run_daily(
+            _send_reminder, time=time_obj, days=(weekday,), chat_id=chat_id, name=job_name,
+            data={"message": message_text, "display": display},
+        )
+        return (
+            f'⏰ Tamam, her {WEEKDAY_NAMES_TR[weekday]} saat {hour:02d}:{minute:02d}\'te '
+            f'hatırlatacağım: "{message_text}"{footer}'
+        )
+
+    if rtype == "monthly":
+        monthday = draft["monthday"]
+        display = f"Her ayın {monthday}. günü {hour:02d}:{minute:02d}"
+        context.job_queue.run_monthly(
+            _send_reminder, when=time_obj, day=monthday, chat_id=chat_id, name=job_name,
+            day_is_strict=False,
+            data={"message": message_text, "display": display},
+        )
+        return (
+            f'⏰ Tamam, her ayın {monthday}. günü saat {hour:02d}:{minute:02d}\'te '
+            f'hatırlatacağım: "{message_text}"{footer}'
+        )
+
+    return "⚠️ Bilinmeyen hatırlatıcı türü."
 
 
 async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -437,11 +531,11 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(args) < 2:
         await update.message.reply_text(
             "Kullanım: /hatirlat <SS:DD> <mesaj>\nÖrnek: /hatirlat 15:04 Sütü ocaktan al\n\n"
-            "İstersen /menu → ⏰ Hatırlatıcı ile adım adım da kurabilirsin."
+            "Tekrarlayan (her gün/hafta/ay) hatırlatıcılar için /menu → ⏰ Hatırlatıcı kullan."
         )
         return
     try:
-        target_dt = _parse_clock_time(args[0])
+        hour, minute = _parse_clock_time(args[0])
     except ValueError:
         await update.message.reply_text(
             "İlk parametre SS:DD formatında bir saat olmalı. Örn: /hatirlat 15:04 Toplantı var"
@@ -450,6 +544,7 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message_text = " ".join(args[1:])
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
 
     if context.job_queue is None:
         await update.message.reply_text(
@@ -457,7 +552,8 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    confirmation = _schedule_reminder(context, chat_id, target_dt, message_text)
+    draft = {"type": "once", "hour": hour, "minute": minute}
+    confirmation = _schedule_reminder_from_draft(context, chat_id, user_id, draft, message_text)
     await update.message.reply_text(confirmation)
 
 
@@ -485,16 +581,61 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(HELP_TEXT, parse_mode="Markdown")
         return
 
-    if data == "remind:start":
+    if data in ("remind:once", "remind:daily"):
         if context.job_queue is None:
             await query.edit_message_text("⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil.")
             return
-        storage.set_mode(query.from_user.id, "reminder_time")
+        user_id = query.from_user.id
+        rtype = "once" if data == "remind:once" else "daily"
+        storage.get_session(user_id)["reminder_draft"] = {"type": rtype}
+        storage.set_mode(user_id, "reminder_time")
+        hint = "Eğer o saat bugün geçtiyse, yarın hatırlatırım.\n\n" if rtype == "once" else ""
         await query.edit_message_text(
-            "⏰ Saat kaçta hatırlatayım? SS:DD formatında yaz (örn. 15:04).\n"
-            "Eğer o saat bugün geçtiyse, yarın aynı saatte hatırlatırım.\n\n"
+            f"⏰ Saat kaçta hatırlatayım? SS:DD formatında yaz (örn. 15:04).\n{hint}"
             "İptal etmek için /menu yazabilirsin."
         )
+        return
+
+    if data == "remind:weekly":
+        if context.job_queue is None:
+            await query.edit_message_text("⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil.")
+            return
+        await query.edit_message_text("📅 Haftanın hangi günü?", reply_markup=weekday_menu())
+        return
+
+    if data.startswith("remwd:"):
+        weekday = int(data.split(":", 1)[1])
+        user_id = query.from_user.id
+        storage.get_session(user_id)["reminder_draft"] = {"type": "weekly", "weekday": weekday}
+        storage.set_mode(user_id, "reminder_time")
+        await query.edit_message_text(
+            f"⏰ Her {WEEKDAY_NAMES_TR[weekday]} saat kaçta hatırlatayım? "
+            f"SS:DD formatında yaz (örn. 09:00)."
+        )
+        return
+
+    if data == "remind:monthly":
+        if context.job_queue is None:
+            await query.edit_message_text("⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil.")
+            return
+        user_id = query.from_user.id
+        storage.get_session(user_id)["reminder_draft"] = {"type": "monthly"}
+        storage.set_mode(user_id, "reminder_pick_monthday")
+        await query.edit_message_text("🗓️ Ayın kaçıncı günü? Bir sayı yaz (1-31).")
+        return
+
+    if data == "remind:list":
+        await show_reminder_list(query, context)
+        return
+
+    if data.startswith("remcancel:"):
+        job_name = data.split(":", 1)[1]
+        jobs = context.job_queue.get_jobs_by_name(job_name)
+        for j in jobs:
+            j.schedule_removal()
+        await query.answer(text="🗑️ Hatırlatıcı silindi.", show_alert=True)
+        await show_reminder_list(query, context)
+        return
         return
 
     if data.startswith("cat:"):
@@ -530,10 +671,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif cat_key == "astrology":
                 extra_markup = astrology_menu()
             elif cat_key == "reminder":
-                extra_markup = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⏰ Hatırlatıcı Kur", callback_data="remind:start")],
-                    [InlineKeyboardButton("⬅️ Geri", callback_data="menu:root")],
-                ])
+                extra_markup = reminder_type_menu()
             else:
                 extra_markup = back_only
             await query.edit_message_text(f"{cat['label']}\n\n{cat['info_text']}", reply_markup=extra_markup)
@@ -933,21 +1071,40 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode == "astrology":
         await handle_astrology_message(update, context, session, user_message)
         return
+    if mode == "reminder_pick_monthday":
+        try:
+            monthday = int(user_message.strip())
+            if not (1 <= monthday <= 31):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text("Bunu ayın günü olarak anlayamadım. 1-31 arası bir sayı yaz.")
+            return
+        draft = session.get("reminder_draft") or {"type": "monthly"}
+        draft["monthday"] = monthday
+        session["reminder_draft"] = draft
+        storage.set_mode(user_id, "reminder_time")
+        await update.message.reply_text(
+            f"⏰ Her ayın {monthday}. günü saat kaçta hatırlatayım? SS:DD formatında yaz (örn. 09:00)."
+        )
+        return
     if mode == "reminder_time":
         try:
-            target_dt = _parse_clock_time(user_message)
+            hour, minute = _parse_clock_time(user_message)
         except ValueError:
             await update.message.reply_text(
                 "Bunu bir saat olarak anlayamadım. SS:DD formatında yaz, örn: 15:04. Tekrar yazar mısın?"
             )
             return
-        session["reminder_pending_time"] = target_dt
+        draft = session.get("reminder_draft") or {"type": "once"}
+        draft["hour"] = hour
+        draft["minute"] = minute
+        session["reminder_draft"] = draft
         storage.set_mode(user_id, "reminder_message")
         await update.message.reply_text("⏰ Tamam. Şimdi ne hatırlatmamı istersin? Mesajını yaz.")
         return
     if mode == "reminder_message":
-        target_dt = session.get("reminder_pending_time")
-        if target_dt is None:
+        draft = session.get("reminder_draft")
+        if not draft:
             storage.set_mode(user_id, "chat")
             await update.message.reply_text("⚠️ Bir şeyler ters gitti, /menu → ⏰ Hatırlatıcı ile tekrar dene.")
             return
@@ -955,8 +1112,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             storage.set_mode(user_id, "chat")
             await update.message.reply_text("⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil.")
             return
-        confirmation = _schedule_reminder(context, chat_id, target_dt, user_message)
-        session["reminder_pending_time"] = None
+        confirmation = _schedule_reminder_from_draft(context, chat_id, user_id, draft, user_message)
+        session["reminder_draft"] = None
         storage.set_mode(user_id, "chat")
         await update.message.reply_text(confirmation)
         return
