@@ -31,6 +31,7 @@ def get_session(user_id: int) -> Dict:
         session = {key: default() for key, default in _DEFAULTS.items()}
         session["last_analysis"] = None
         session["reminder_pending_time"] = None
+        session["reminder_draft"] = None
         session["history"] = []
 
         saved = _load_settings(user_id)
