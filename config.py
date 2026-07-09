@@ -266,4 +266,19 @@ CATEGORIES = {
             "Sohbet moduna dönmek için /menu → 🤖 Sohbet AI'dan bir model seç."
         ),
     },
+    "files": {
+        "label": "📁 Dosya İşlemleri",
+        "description": "PDF, Word, Excel, CSV ve metin dosyalarını okuma ve analiz.",
+        "providers": [],
+        "enabled": True,
+        "info_text": (
+            "İstediğin an (hangi modda olursan ol) bana bir **PDF, Word (.docx), "
+            "Excel (.xlsx), CSV ya da metin (.txt)** dosyası gönderebilirsin — "
+            "içeriğini okuyup özetler/analiz ederim.\n\n"
+            "Dosyayı gönderirken altyazı (caption) olarak özel bir talimat da "
+            "yazabilirsin (örn. 'bu tablodaki toplamı hesapla').\n\n"
+            "Cevabın altındaki 📄 Word'e Aktar / 📊 Excel'e Aktar butonlarıyla "
+            "sonucu indirebilirsin."
+        ),
+    },
 }
