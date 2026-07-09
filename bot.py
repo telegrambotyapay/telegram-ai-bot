@@ -40,7 +40,7 @@ from image_gen import (
     analyze_image_gemini,
     ImageGenError,
 )
-from document_export import create_docx, create_xlsx
+from document_export import create_docx, create_xlsx, create_pdf
 from file_reader import read_file, FileReadError
 from astrology import get_horoscope, get_birth_chart, AstrologyError
 from tools import (
@@ -125,6 +125,9 @@ def memory_buttons() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📄 Word'e Aktar", callback_data="export:docx"),
             InlineKeyboardButton("📊 Excel'e Aktar", callback_data="export:xlsx"),
         ],
+        [
+            InlineKeyboardButton("📕 PDF'e Aktar", callback_data="export:pdf"),
+        ],
     ])
 
 
@@ -136,6 +139,7 @@ def category_menu() -> InlineKeyboardMarkup:
     buttons.append(
         [InlineKeyboardButton("🧹 Tüm Hafızayı ve Ayarları Sıfırla", callback_data="reset:all")]
     )
+    buttons.append([InlineKeyboardButton("❓ Yardım", callback_data="help:show")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -358,29 +362,51 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hafızan ve tüm ayarların (aktif model, mod) varsayılana sıfırlandı. 🧹")
 
 
+HELP_TEXT = (
+    "🤖 *Yapabildiklerim*\n\n"
+    "*/menu* — kategori ve model/servis/araç seç\n"
+    "*/reset* — hafızayı ve tüm ayarları sıfırla\n"
+    "*/hatirlat <saat> <mesaj>* — zamanlı hatırlatma kur (ya da /menu → "
+    "⏰ Hatırlatıcı ile adım adım kur)\n"
+    "*/help* — bu mesaj\n\n"
+    "*Kategoriler:*\n"
+    "🤖 Sohbet AI — 9 farklı yapay zeka modeli\n"
+    "🐾 Veteriner Asistanı — hayvan sağlığı sorularına genel bilgi\n"
+    "🎨 Görsel Üretimi — metinden görsel/video üretimi\n"
+    "🎙️ Ses İşlemleri — sesli mesaj ↔ yazı çevirisi\n"
+    "🔍 Bilgi & Araçlar — hava durumu, döviz, arama, link özetleme, "
+    "yüz analizi ve daha fazlası\n"
+    "📁 Dosya İşlemleri — PDF/Word/Excel/CSV okuma ve analiz\n"
+    "🔮 Astroloji — burç yorumları ve doğum haritası\n"
+    "⏰ Hatırlatıcı — adım adım zamanlı hatırlatma kurma\n\n"
+    "*Her zaman, hangi modda olursan ol:*\n"
+    "🎙️ Sesli mesaj gönderebilirsin (otomatik yazıya çevrilir)\n"
+    "📷 Fotoğraf gönderebilirsin (otomatik analiz edilir)\n"
+    "📁 Belge gönderebilirsin (otomatik okunup özetlenir)\n\n"
+    "Her AI cevabının altında: 💾 Kaydet · 🗑️ Temizle · 🔊 Sesli Dinle · "
+    "🔄 Yönlendir · 📄 Word'e Aktar · 📊 Excel'e Aktar · 📕 PDF'e Aktar"
+)
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 *Yapabildiklerim*\n\n"
-        "*/menu* — kategori ve model/servis/araç seç\n"
-        "*/reset* — hafızayı ve tüm ayarları sıfırla\n"
-        "*/hatirlat <dakika> <mesaj>* — zamanlı hatırlatma kur\n"
-        "*/help* — bu mesaj\n\n"
-        "*Kategoriler:*\n"
-        "🤖 Sohbet AI — 9 farklı yapay zeka modeli\n"
-        "🐾 Veteriner Asistanı — hayvan sağlığı sorularına genel bilgi\n"
-        "🎨 Görsel Üretimi — metinden görsel/video üretimi\n"
-        "🎙️ Ses İşlemleri — sesli mesaj ↔ yazı çevirisi\n"
-        "🔍 Bilgi & Araçlar — hava durumu, döviz, arama, link özetleme, "
-        "yüz analizi ve daha fazlası\n"
-        "📁 Dosya İşlemleri — PDF/Word/Excel/CSV okuma ve analiz\n"
-        "🔮 Astroloji — burç yorumları ve doğum haritası\n\n"
-        "*Her zaman, hangi modda olursan ol:*\n"
-        "🎙️ Sesli mesaj gönderebilirsin (otomatik yazıya çevrilir)\n"
-        "📷 Fotoğraf gönderebilirsin (otomatik analiz edilir)\n"
-        "📁 Belge gönderebilirsin (otomatik okunup özetlenir)\n\n"
-        "Her AI cevabının altında: 💾 Kaydet · 🗑️ Temizle · 🔊 Sesli Dinle · "
-        "🔄 Yönlendir · 📄 Word'e Aktar · 📊 Excel'e Aktar",
-        parse_mode="Markdown",
+    await update.message.reply_text(HELP_TEXT, parse_mode="Markdown")
+
+
+def _schedule_reminder(context: ContextTypes.DEFAULT_TYPE, chat_id: int, hours: float, message_text: str) -> str:
+    """Hatırlatmayı job_queue'ya ekler, kullanıcıya gösterilecek onay metnini döner."""
+    async def _send_reminder(ctx: ContextTypes.DEFAULT_TYPE):
+        await ctx.bot.send_message(chat_id=chat_id, text=f"⏰ Hatırlatma: {message_text}")
+
+    context.job_queue.run_once(_send_reminder, when=hours * 3600, chat_id=chat_id)
+
+    if hours < 1:
+        when_text = f"{hours * 60:g} dakika sonra"
+    else:
+        when_text = f"{hours:g} saat sonra"
+    return (
+        f'⏰ Tamam, {when_text} hatırlatacağım: "{message_text}"\n\n'
+        f"Not: Bot bu süre içinde yeniden başlarsa (örn. bir güncelleme deploy edilirse) "
+        f"bu hatırlatma kaybolur."
     )
 
 
@@ -388,16 +414,17 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) < 2:
         await update.message.reply_text(
-            "Kullanım: /hatirlat <dakika> <mesaj>\nÖrnek: /hatirlat 30 Sütü ocaktan al"
+            "Kullanım: /hatirlat <saat> <mesaj>\nÖrnek: /hatirlat 0.5 Sütü ocaktan al\n\n"
+            "İstersen /menu → ⏰ Hatırlatıcı ile adım adım da kurabilirsin."
         )
         return
     try:
-        minutes = float(args[0].replace(",", "."))
-        if minutes <= 0:
+        hours = float(args[0].replace(",", "."))
+        if hours <= 0:
             raise ValueError
     except ValueError:
         await update.message.reply_text(
-            "İlk parametre pozitif bir dakika sayısı olmalı. Örn: /hatirlat 30 Toplantı var"
+            "İlk parametre pozitif bir saat sayısı olmalı. Örn: /hatirlat 2 Toplantı var"
         )
         return
 
@@ -410,20 +437,8 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    async def _send_reminder(ctx: ContextTypes.DEFAULT_TYPE):
-        await ctx.bot.send_message(chat_id=chat_id, text=f"⏰ Hatırlatma: {message_text}")
-
-    context.job_queue.run_once(_send_reminder, when=minutes * 60, chat_id=chat_id)
-
-    if minutes < 60:
-        when_text = f"{minutes:g} dakika sonra"
-    else:
-        when_text = f"{minutes / 60:g} saat sonra"
-    await update.message.reply_text(
-        f'⏰ Tamam, {when_text} hatırlatacağım: "{message_text}"\n\n'
-        f"Not: Bot bu süre içinde yeniden başlarsa (örn. bir güncelleme deploy edilirse) "
-        f"bu hatırlatma kaybolur."
-    )
+    confirmation = _schedule_reminder(context, chat_id, hours, message_text)
+    await update.message.reply_text(confirmation)
 
 
 # ==================== Callback (buton) işleyicileri ====================
@@ -443,6 +458,21 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🧹 Her şey sıfırlandı! Hafıza temizlendi, tüm yapay zekalar/araçlar "
             "varsayılana döndü.\n\nBir kategori seç:",
             reply_markup=category_menu(),
+        )
+        return
+
+    if data == "help:show":
+        await query.message.reply_text(HELP_TEXT, parse_mode="Markdown")
+        return
+
+    if data == "remind:start":
+        if context.job_queue is None:
+            await query.edit_message_text("⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil.")
+            return
+        storage.set_mode(query.from_user.id, "reminder_hours")
+        await query.edit_message_text(
+            "⏰ Kaç saat sonra hatırlatayım? Bir sayı yaz (örn. 2 ya da 0.5).\n\n"
+            "İptal etmek için /menu yazabilirsin."
         )
         return
 
@@ -478,6 +508,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 extra_markup = tool_menu()
             elif cat_key == "astrology":
                 extra_markup = astrology_menu()
+            elif cat_key == "reminder":
+                extra_markup = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⏰ Hatırlatıcı Kur", callback_data="remind:start")],
+                    [InlineKeyboardButton("⬅️ Geri", callback_data="menu:root")],
+                ])
             else:
                 extra_markup = back_only
             await query.edit_message_text(f"{cat['label']}\n\n{cat['info_text']}", reply_markup=extra_markup)
@@ -605,7 +640,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(audio_path)
         return
 
-    if data in ("export:docx", "export:xlsx"):
+    if data in ("export:docx", "export:xlsx", "export:pdf"):
         user_id = query.from_user.id
         chat_id = query.message.chat_id
         session = storage.get_session(user_id)
@@ -616,8 +651,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             if data == "export:docx":
                 file_path = create_docx("AI Çıktısı", analysis)
-            else:
+            elif data == "export:xlsx":
                 file_path = create_xlsx("AI Çıktısı", analysis)
+            else:
+                file_path = create_pdf("AI Çıktısı", analysis)
         except Exception as e:
             logger.exception("Dosya oluşturma hatası")
             await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Dosya oluşturulamadı: {e}")
@@ -679,13 +716,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session = storage.get_session(user_id)
     session["last_analysis"] = analysis
 
-    export_buttons = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📄 Word'e Aktar", callback_data="export:docx"),
-            InlineKeyboardButton("📊 Excel'e Aktar", callback_data="export:xlsx"),
-        ]
-    ])
-    await send_long_text(context.bot, chat_id, f"🔍 {analysis}", reply_markup=export_buttons)
+    await send_long_text(context.bot, chat_id, f"🔍 {analysis}", reply_markup=memory_buttons())
 
 
 # ==================== Belge dosyaları (PDF/Word/Excel/CSV/TXT) ====================
@@ -880,6 +911,35 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if mode == "astrology":
         await handle_astrology_message(update, context, session, user_message)
+        return
+    if mode == "reminder_hours":
+        try:
+            hours = float(user_message.strip().replace(",", "."))
+            if hours <= 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "Bunu bir saat sayısı olarak anlayamadım. Örn: 2 ya da 0.5. Tekrar yazar mısın?"
+            )
+            return
+        session["reminder_pending_hours"] = hours
+        storage.set_mode(user_id, "reminder_message")
+        await update.message.reply_text("⏰ Tamam. Şimdi ne hatırlatmamı istersin? Mesajını yaz.")
+        return
+    if mode == "reminder_message":
+        hours = session.get("reminder_pending_hours")
+        if hours is None:
+            storage.set_mode(user_id, "chat")
+            await update.message.reply_text("⚠️ Bir şeyler ters gitti, /menu → ⏰ Hatırlatıcı ile tekrar dene.")
+            return
+        if context.job_queue is None:
+            storage.set_mode(user_id, "chat")
+            await update.message.reply_text("⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil.")
+            return
+        confirmation = _schedule_reminder(context, chat_id, hours, user_message)
+        session["reminder_pending_hours"] = None
+        storage.set_mode(user_id, "chat")
+        await update.message.reply_text(confirmation)
         return
 
     provider_key = session["provider"]
