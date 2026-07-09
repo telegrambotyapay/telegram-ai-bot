@@ -30,6 +30,7 @@ def get_session(user_id: int) -> Dict:
     if user_id not in _sessions:
         session = {key: default() for key, default in _DEFAULTS.items()}
         session["last_analysis"] = None
+        session["reminder_pending_hours"] = None
         session["history"] = []
 
         saved = _load_settings(user_id)
