@@ -42,6 +42,7 @@ from image_gen import (
 )
 from document_export import create_docx, create_xlsx
 from file_reader import read_file, FileReadError
+from astrology import get_horoscope, get_birth_chart, AstrologyError
 from tools import (
     get_weather,
     get_exchange_rate,
@@ -191,6 +192,22 @@ def tool_confirm_menu(tool_key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Bunu kullan", callback_data=f"tuse:{tool_key}")],
         [InlineKeyboardButton("⬅️ Geri", callback_data="cat:tools")],
+    ])
+
+
+def astrology_menu() -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(info["label"], callback_data=f"aprov:{key}")]
+        for key, info in config.ASTROLOGY_FEATURES.items()
+    ]
+    buttons.append([InlineKeyboardButton("⬅️ Geri", callback_data="menu:root")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def astrology_confirm_menu(feature_key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Bunu kullan", callback_data=f"ause:{feature_key}")],
+        [InlineKeyboardButton("⬅️ Geri", callback_data="cat:astrology")],
     ])
 
 
@@ -373,6 +390,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 extra_markup = provider_menu("image")
             elif cat_key == "tools":
                 extra_markup = tool_menu()
+            elif cat_key == "astrology":
+                extra_markup = astrology_menu()
             else:
                 extra_markup = back_only
             await query.edit_message_text(f"{cat['label']}\n\n{cat['info_text']}", reply_markup=extra_markup)
@@ -462,6 +481,24 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("tuse:"):
         tool_key = data.split(":", 1)[1]
         await activate_tool(query, context, tool_key)
+        return
+
+    if data.startswith("aprov:"):
+        feature_key = data.split(":", 1)[1]
+        info = config.ASTROLOGY_FEATURES[feature_key]
+        await query.edit_message_text(
+            f"{info['label']}\n\n{info['description']}",
+            reply_markup=astrology_confirm_menu(feature_key),
+        )
+        return
+
+    if data.startswith("ause:"):
+        feature_key = data.split(":", 1)[1]
+        user_id = query.from_user.id
+        storage.set_mode(user_id, "astrology")
+        storage.set_active_astrology_feature(user_id, feature_key)
+        info = config.ASTROLOGY_FEATURES[feature_key]
+        await query.edit_message_text(f"✅ Aktif: {info['label']}\n\n{info['description']}")
         return
 
     if data == "tts:speak":
@@ -593,6 +630,33 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await generate_and_deliver(context.bot, chat_id, user_id, prompt, context_history, provider_key)
 
 
+# ==================== Astroloji mesajları ====================
+
+async def handle_astrology_message(update: Update, context: ContextTypes.DEFAULT_TYPE, session: dict, text: str):
+    chat_id = update.effective_chat.id
+    feature_key = session.get("active_astrology_feature")
+
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+    try:
+        if feature_key in ("daily", "weekly", "monthly"):
+            result = get_horoscope(text, feature_key)
+        elif feature_key == "birthchart":
+            result = get_birth_chart(text)
+        else:
+            await update.message.reply_text("⚠️ Bilinmeyen astroloji özelliği, /menu ile tekrar seç.")
+            return
+    except AstrologyError as e:
+        await update.message.reply_text(f"⚠️ {e}", reply_markup=switch_button())
+        return
+    except Exception as e:
+        logger.exception("Astroloji özelliğinde beklenmeyen hata")
+        await update.message.reply_text(f"⚠️ Beklenmeyen bir hata oluştu: {e}", reply_markup=switch_button())
+        return
+
+    await update.message.reply_text(result, reply_markup=switch_button())
+
+
 # ==================== Araç mesajları ====================
 
 async def handle_tool_message(update: Update, context: ContextTypes.DEFAULT_TYPE, session: dict, text: str):
@@ -680,6 +744,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if mode == "tools":
         await handle_tool_message(update, context, session, user_message)
+        return
+    if mode == "astrology":
+        await handle_astrology_message(update, context, session, user_message)
         return
 
     provider_key = session["provider"]
