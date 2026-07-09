@@ -274,7 +274,13 @@ CATEGORIES = {
     "chat": {
         "label": "🤖 Sohbet AI",
         "description": "Bir yapay zeka modeli seç ve onunla sohbete başla.",
-        "providers": list(PROVIDERS.keys()),
+        "providers": [k for k in PROVIDERS.keys() if k != "vet_assistant"],
+        "enabled": True,
+    },
+    "vet": {
+        "label": "🐾 Veteriner Asistanı",
+        "description": "Evcil/çiftlik hayvanı sağlığı, beslenmesi ve bakımı hakkında bilgi al.",
+        "providers": ["vet_assistant"],
         "enabled": True,
     },
     "image": {
