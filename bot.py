@@ -217,6 +217,10 @@ def combined_switch_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(config.PROVIDERS[p]["label"], callback_data=f"switchuse:{p}")]
         for p in config.CATEGORIES["chat"]["providers"]
     ]
+    buttons.append([InlineKeyboardButton("── 🐾 Veteriner ──", callback_data="noop")])
+    buttons.append(
+        [InlineKeyboardButton(config.PROVIDERS["vet_assistant"]["label"], callback_data="switchuse:vet_assistant")]
+    )
     buttons.append([InlineKeyboardButton("── 🎨 Görsel/Video ──", callback_data="noop")])
     for p in config.CATEGORIES["image"]["providers"]:
         buttons.append(
@@ -381,6 +385,18 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 f"{cat['label']}\n\n🚧 Bu kategori yakında eklenecek.", reply_markup=back_only
             )
+            return
+
+        if len(cat["providers"]) == 1 and not cat.get("info_text"):
+            # Tek seçenekli kategori: liste adımını atla, direkt açıklama + onay göster.
+            only_key = cat["providers"][0]
+            pdict = _provider_dict_for_category(cat_key)
+            info = pdict[only_key]
+            single_markup = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Bu modelle sohbete başla", callback_data=f"use:{only_key}")],
+                [InlineKeyboardButton("⬅️ Geri", callback_data="menu:root")],
+            ])
+            await query.edit_message_text(f"{info['label']}\n\n{info['description']}", reply_markup=single_markup)
             return
 
         if cat.get("info_text"):
