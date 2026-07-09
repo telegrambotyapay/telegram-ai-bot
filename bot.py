@@ -51,6 +51,8 @@ from tools import (
     get_air_quality,
     scan_url_virustotal,
     get_nasa_apod,
+    fetch_and_extract_url,
+    analyze_face,
     ToolError,
 )
 
@@ -356,6 +358,74 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Hafızan ve tüm ayarların (aktif model, mod) varsayılana sıfırlandı. 🧹")
 
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 *Yapabildiklerim*\n\n"
+        "*/menu* — kategori ve model/servis/araç seç\n"
+        "*/reset* — hafızayı ve tüm ayarları sıfırla\n"
+        "*/hatirlat <dakika> <mesaj>* — zamanlı hatırlatma kur\n"
+        "*/help* — bu mesaj\n\n"
+        "*Kategoriler:*\n"
+        "🤖 Sohbet AI — 9 farklı yapay zeka modeli\n"
+        "🐾 Veteriner Asistanı — hayvan sağlığı sorularına genel bilgi\n"
+        "🎨 Görsel Üretimi — metinden görsel/video üretimi\n"
+        "🎙️ Ses İşlemleri — sesli mesaj ↔ yazı çevirisi\n"
+        "🔍 Bilgi & Araçlar — hava durumu, döviz, arama, link özetleme, "
+        "yüz analizi ve daha fazlası\n"
+        "📁 Dosya İşlemleri — PDF/Word/Excel/CSV okuma ve analiz\n"
+        "🔮 Astroloji — burç yorumları ve doğum haritası\n\n"
+        "*Her zaman, hangi modda olursan ol:*\n"
+        "🎙️ Sesli mesaj gönderebilirsin (otomatik yazıya çevrilir)\n"
+        "📷 Fotoğraf gönderebilirsin (otomatik analiz edilir)\n"
+        "📁 Belge gönderebilirsin (otomatik okunup özetlenir)\n\n"
+        "Her AI cevabının altında: 💾 Kaydet · 🗑️ Temizle · 🔊 Sesli Dinle · "
+        "🔄 Yönlendir · 📄 Word'e Aktar · 📊 Excel'e Aktar",
+        parse_mode="Markdown",
+    )
+
+
+async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text(
+            "Kullanım: /hatirlat <dakika> <mesaj>\nÖrnek: /hatirlat 30 Sütü ocaktan al"
+        )
+        return
+    try:
+        minutes = float(args[0].replace(",", "."))
+        if minutes <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(
+            "İlk parametre pozitif bir dakika sayısı olmalı. Örn: /hatirlat 30 Toplantı var"
+        )
+        return
+
+    message_text = " ".join(args[1:])
+    chat_id = update.effective_chat.id
+
+    if context.job_queue is None:
+        await update.message.reply_text(
+            "⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil."
+        )
+        return
+
+    async def _send_reminder(ctx: ContextTypes.DEFAULT_TYPE):
+        await ctx.bot.send_message(chat_id=chat_id, text=f"⏰ Hatırlatma: {message_text}")
+
+    context.job_queue.run_once(_send_reminder, when=minutes * 60, chat_id=chat_id)
+
+    if minutes < 60:
+        when_text = f"{minutes:g} dakika sonra"
+    else:
+        when_text = f"{minutes / 60:g} saat sonra"
+    await update.message.reply_text(
+        f'⏰ Tamam, {when_text} hatırlatacağım: "{message_text}"\n\n'
+        f"Not: Bot bu süre içinde yeniden başlarsa (örn. bir güncelleme deploy edilirse) "
+        f"bu hatırlatma kaybolur."
+    )
+
+
 # ==================== Callback (buton) işleyicileri ====================
 
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -565,6 +635,24 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+    session = storage.get_session(user_id)
+
+    # Yüz Analizi aracı aktifse, Gemini yerine Face++ kullan
+    if session.get("mode") == "tools" and session.get("active_tool") == "face_analysis":
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = bytes(await photo_file.download_as_bytearray())
+        try:
+            result = analyze_face(image_bytes)
+        except ToolError as e:
+            await update.message.reply_text(f"⚠️ {e}", reply_markup=switch_button())
+            return
+        except Exception as e:
+            logger.exception("Yüz analizinde beklenmeyen hata")
+            await update.message.reply_text(f"⚠️ Beklenmeyen bir hata oluştu: {e}", reply_markup=switch_button())
+            return
+        await update.message.reply_text(result, reply_markup=switch_button())
+        return
 
     if not config.GOOGLE_AI_STUDIO_API_KEY:
         await update.message.reply_text(
@@ -655,7 +743,7 @@ async def handle_astrology_message(update: Update, context: ContextTypes.DEFAULT
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
     try:
-        if feature_key in ("daily", "weekly", "monthly"):
+        if feature_key in ("daily", "weekly", "monthly", "yearly"):
             result = get_horoscope(text, feature_key)
         elif feature_key == "birthchart":
             result = get_birth_chart(text)
@@ -670,14 +758,43 @@ async def handle_astrology_message(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text(f"⚠️ Beklenmeyen bir hata oluştu: {e}", reply_markup=switch_button())
         return
 
-    await update.message.reply_text(result, reply_markup=switch_button())
+    await send_long_text(context.bot, chat_id, result, reply_markup=switch_button())
 
 
 # ==================== Araç mesajları ====================
 
 async def handle_tool_message(update: Update, context: ContextTypes.DEFAULT_TYPE, session: dict, text: str):
+    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     tool_key = session.get("active_tool")
+
+    if tool_key == "face_analysis":
+        await update.message.reply_text(
+            "😀 Bu araç fotoğraf bekliyor — lütfen bir FOTOĞRAF gönder (metin değil)."
+        )
+        return
+
+    if tool_key == "link_summary":
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        try:
+            content = fetch_and_extract_url(text)
+        except ToolError as e:
+            await update.message.reply_text(f"⚠️ {e}", reply_markup=switch_button())
+            return
+        except Exception as e:
+            logger.exception("Link özetlemede beklenmeyen hata")
+            await update.message.reply_text(f"⚠️ Beklenmeyen bir hata oluştu: {e}", reply_markup=switch_button())
+            return
+
+        prompt = (
+            f"Aşağıda bir web sayfasından ({text}) çekilen içerik var. Bunu özetle, "
+            f"önemli noktaları belirt:\n\n{content}"
+        )
+        provider_key = session["provider"]
+        context_history = list(session["history"])
+        storage.append_message(user_id, "user", f"[🔗 Link özetleniyor: {text}]")
+        await generate_and_deliver(context.bot, chat_id, user_id, prompt, context_history, provider_key)
+        return
 
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
@@ -840,6 +957,8 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CommandHandler("reset", reset))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("hatirlat", remind_command))
     app.add_handler(CallbackQueryHandler(callback_router))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
