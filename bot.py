@@ -41,7 +41,7 @@ from image_gen import (
     generate_gemini_image,
     generate_agnes_image,
     generate_json2video,
-    analyze_image_gemini,
+    analyze_image,
     ImageGenError,
 )
 from document_export import create_docx, create_xlsx, create_pdf
@@ -851,9 +851,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(result, reply_markup=switch_button())
         return
 
-    if not config.GOOGLE_AI_STUDIO_API_KEY:
+    if not config.GROQ_API_KEY and not config.GOOGLE_AI_STUDIO_API_KEY:
         await update.message.reply_text(
-            "⚠️ Görsel analizi için GOOGLE_AI_STUDIO_API_KEY gerekiyor, tanımlı değil."
+            "⚠️ Görsel analizi için GROQ_API_KEY ya da GOOGLE_AI_STUDIO_API_KEY tanımlı olmalı."
         )
         return
 
@@ -864,7 +864,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = update.message.caption
 
     try:
-        analysis = await asyncio.to_thread(analyze_image_gemini, image_bytes, instruction=caption)
+        analysis = await asyncio.to_thread(analyze_image, image_bytes, instruction=caption)
     except ImageGenError as e:
         await update.message.reply_text(f"⚠️ Görsel analiz edilemedi:\n{e}")
         return
