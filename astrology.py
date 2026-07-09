@@ -83,7 +83,7 @@ def get_horoscope(sign_text: str, period: str) -> str:
         f"olmasın, direkt yorumla başla."
     )
     try:
-        adapter = get_adapter("google")
+        adapter = get_adapter("groq")
         return adapter.generate([], prompt)
     except ProviderError as e:
         raise AstrologyError(f"Burç yorumu üretilemedi: {e}") from e
@@ -168,7 +168,7 @@ def get_birth_chart(text: str) -> str:
             "dikkat etmesi gerekebilecek noktalar. 4-6 paragraf, abartılı "
             "kehanetlerden kaçın, dengeli bir üslup kullan.\n\n" + raw_chart
         )
-        adapter = get_adapter("google")
+        adapter = get_adapter("groq")
         interpretation = adapter.generate([], interpretation_prompt)
     except (ProviderError, Exception) as e:
         logger.warning(f"Doğum haritası yorumu üretilemedi: {e}")
