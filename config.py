@@ -368,11 +368,23 @@ CATEGORIES = {
         "enabled": True,
         "info_text": (
             "Bir özellik seç:\n\n"
-            "☀️/📅/🗓️ Burç yorumları için sadece burcunu yazman yeterli.\n"
+            "☀️/📅/🗓️/🎉 Burç yorumları için sadece burcunu yazman yeterli.\n"
             "🌌 Doğum haritası için tarih, saat ve doğum yerini gireceksin.\n\n"
-            "Not: Bu özellikler ücretsiz ama sınırlı kotaya sahip (burç "
-            "yorumları ayda ~50 istekle sınırlı), çok sık kullanırsan kota "
-            "dolabilir."
+            "Not: Doğum haritası hesaplaması sınırlı kotaya sahip bir dış "
+            "servis kullanıyor, yoğun saatlerde biraz gecikebilir."
+        ),
+    },
+    "reminder": {
+        "label": "⏰ Hatırlatıcı",
+        "description": "Adım adım, zamanlı hatırlatma kur.",
+        "providers": [],
+        "enabled": True,
+        "info_text": (
+            "Bana kaç saat sonra ne hatırlatmamı istediğini adım adım "
+            "soracağım. İstersen /hatirlat <saat> <mesaj> komutunu da "
+            "doğrudan kullanabilirsin.\n\n"
+            "Not: Bot bu süre içinde yeniden başlarsa (deploy edilirse) "
+            "kurulan hatırlatma kaybolur."
         ),
     },
 }
