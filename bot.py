@@ -16,6 +16,8 @@ import os
 import io
 import logging
 import threading
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -366,7 +368,7 @@ HELP_TEXT = (
     "🤖 *Yapabildiklerim*\n\n"
     "*/menu* — kategori ve model/servis/araç seç\n"
     "*/reset* — hafızayı ve tüm ayarları sıfırla\n"
-    "*/hatirlat <saat> <mesaj>* — zamanlı hatırlatma kur (ya da /menu → "
+    "*/hatirlat <SS:DD> <mesaj>* — zamanlı hatırlatma kur (ya da /menu → "
     "⏰ Hatırlatıcı ile adım adım kur)\n"
     "*/help* — bu mesaj\n\n"
     "*Kategoriler:*\n"
@@ -392,19 +394,39 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(HELP_TEXT, parse_mode="Markdown")
 
 
-def _schedule_reminder(context: ContextTypes.DEFAULT_TYPE, chat_id: int, hours: float, message_text: str) -> str:
+ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
+
+
+def _parse_clock_time(text: str) -> datetime:
+    """'15:04' formatını ayrıştırır, sonraki gerçekleşme zamanını (İstanbul saatiyle) döner."""
+    text = text.strip()
+    try:
+        hour_str, minute_str = text.split(":")
+        hour, minute = int(hour_str), int(minute_str)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
+    except ValueError:
+        raise ValueError("format")
+
+    now = datetime.now(ISTANBUL_TZ)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target
+
+
+def _schedule_reminder(context: ContextTypes.DEFAULT_TYPE, chat_id: int, target_dt: datetime, message_text: str) -> str:
     """Hatırlatmayı job_queue'ya ekler, kullanıcıya gösterilecek onay metnini döner."""
     async def _send_reminder(ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=chat_id, text=f"⏰ Hatırlatma: {message_text}")
 
-    context.job_queue.run_once(_send_reminder, when=hours * 3600, chat_id=chat_id)
+    context.job_queue.run_once(_send_reminder, when=target_dt, chat_id=chat_id)
 
-    if hours < 1:
-        when_text = f"{hours * 60:g} dakika sonra"
-    else:
-        when_text = f"{hours:g} saat sonra"
+    now = datetime.now(ISTANBUL_TZ)
+    day_word = "bugün" if target_dt.date() == now.date() else "yarın"
+    time_str = target_dt.strftime("%H:%M")
     return (
-        f'⏰ Tamam, {when_text} hatırlatacağım: "{message_text}"\n\n'
+        f'⏰ Tamam, {day_word} saat {time_str}\'te hatırlatacağım: "{message_text}"\n\n'
         f"Not: Bot bu süre içinde yeniden başlarsa (örn. bir güncelleme deploy edilirse) "
         f"bu hatırlatma kaybolur."
     )
@@ -414,17 +436,15 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if len(args) < 2:
         await update.message.reply_text(
-            "Kullanım: /hatirlat <saat> <mesaj>\nÖrnek: /hatirlat 0.5 Sütü ocaktan al\n\n"
+            "Kullanım: /hatirlat <SS:DD> <mesaj>\nÖrnek: /hatirlat 15:04 Sütü ocaktan al\n\n"
             "İstersen /menu → ⏰ Hatırlatıcı ile adım adım da kurabilirsin."
         )
         return
     try:
-        hours = float(args[0].replace(",", "."))
-        if hours <= 0:
-            raise ValueError
+        target_dt = _parse_clock_time(args[0])
     except ValueError:
         await update.message.reply_text(
-            "İlk parametre pozitif bir saat sayısı olmalı. Örn: /hatirlat 2 Toplantı var"
+            "İlk parametre SS:DD formatında bir saat olmalı. Örn: /hatirlat 15:04 Toplantı var"
         )
         return
 
@@ -437,7 +457,7 @@ async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    confirmation = _schedule_reminder(context, chat_id, hours, message_text)
+    confirmation = _schedule_reminder(context, chat_id, target_dt, message_text)
     await update.message.reply_text(confirmation)
 
 
@@ -469,9 +489,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.job_queue is None:
             await query.edit_message_text("⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil.")
             return
-        storage.set_mode(query.from_user.id, "reminder_hours")
+        storage.set_mode(query.from_user.id, "reminder_time")
         await query.edit_message_text(
-            "⏰ Kaç saat sonra hatırlatayım? Bir sayı yaz (örn. 2 ya da 0.5).\n\n"
+            "⏰ Saat kaçta hatırlatayım? SS:DD formatında yaz (örn. 15:04).\n"
+            "Eğer o saat bugün geçtiyse, yarın aynı saatte hatırlatırım.\n\n"
             "İptal etmek için /menu yazabilirsin."
         )
         return
@@ -912,23 +933,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode == "astrology":
         await handle_astrology_message(update, context, session, user_message)
         return
-    if mode == "reminder_hours":
+    if mode == "reminder_time":
         try:
-            hours = float(user_message.strip().replace(",", "."))
-            if hours <= 0:
-                raise ValueError
+            target_dt = _parse_clock_time(user_message)
         except ValueError:
             await update.message.reply_text(
-                "Bunu bir saat sayısı olarak anlayamadım. Örn: 2 ya da 0.5. Tekrar yazar mısın?"
+                "Bunu bir saat olarak anlayamadım. SS:DD formatında yaz, örn: 15:04. Tekrar yazar mısın?"
             )
             return
-        session["reminder_pending_hours"] = hours
+        session["reminder_pending_time"] = target_dt
         storage.set_mode(user_id, "reminder_message")
         await update.message.reply_text("⏰ Tamam. Şimdi ne hatırlatmamı istersin? Mesajını yaz.")
         return
     if mode == "reminder_message":
-        hours = session.get("reminder_pending_hours")
-        if hours is None:
+        target_dt = session.get("reminder_pending_time")
+        if target_dt is None:
             storage.set_mode(user_id, "chat")
             await update.message.reply_text("⚠️ Bir şeyler ters gitti, /menu → ⏰ Hatırlatıcı ile tekrar dene.")
             return
@@ -936,8 +955,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             storage.set_mode(user_id, "chat")
             await update.message.reply_text("⚠️ Hatırlatıcı özelliği için sunucuda job-queue bileşeni kurulu değil.")
             return
-        confirmation = _schedule_reminder(context, chat_id, hours, user_message)
-        session["reminder_pending_hours"] = None
+        confirmation = _schedule_reminder(context, chat_id, target_dt, user_message)
+        session["reminder_pending_time"] = None
         storage.set_mode(user_id, "chat")
         await update.message.reply_text(confirmation)
         return
