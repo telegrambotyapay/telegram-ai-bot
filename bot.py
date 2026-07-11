@@ -22,7 +22,12 @@ from datetime import datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -133,6 +138,12 @@ def memory_buttons() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📕 PDF'e Aktar", callback_data="export:pdf"),
         ],
     ])
+
+
+MAIN_MENU_LABEL = "📋 Ana Menü"
+MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
+    [[MAIN_MENU_LABEL]], resize_keyboard=True, is_persistent=True
+)
 
 
 def category_menu() -> InlineKeyboardMarkup:
@@ -352,13 +363,21 @@ async def activate_provider_and_continue(query, context, provider_key: str):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Merhaba! 👋 Ben çoklu yapay zeka destekli bir Telegram botuyum.\n\n"
-        "Kategorileri görmek için /menu yaz.\n"
-        "Hafızanı tamamen sıfırlamak için /reset kullanabilirsin."
+        "Kategorileri görmek için /menu yaz ya da aşağıdaki 📋 Ana Menü "
+        "butonuna bas.\n"
+        "Hafızanı tamamen sıfırlamak için /reset kullanabilirsin.",
+        reply_markup=MAIN_MENU_KEYBOARD,
     )
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bir kategori seç:", reply_markup=category_menu())
+    await update.message.reply_text(
+        "Bir kategori seç:", reply_markup=category_menu()
+    )
+    # Kalıcı klavyenin aktif olduğundan emin oluyoruz (sadece ilk seferde, bir kere).
+    if not context.chat_data.get("main_menu_keyboard_sent"):
+        await update.message.reply_text("📋 Ana Menü butonu artık her zaman altta duracak.", reply_markup=MAIN_MENU_KEYBOARD)
+        context.chat_data["main_menu_keyboard_sent"] = True
 
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1061,6 +1080,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     session = storage.get_session(user_id)
     user_message = update.message.text
+
+    if user_message.strip() == MAIN_MENU_LABEL:
+        await menu(update, context)
+        return
 
     mode = session.get("mode", "chat")
     if mode == "image":
