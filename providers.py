@@ -4,6 +4,7 @@ Bu modül hepsini tek bir ortak arayüz (generate) altında birleştirir.
 """
 from __future__ import annotations
 import os
+import re
 import time
 import logging
 from datetime import datetime
@@ -73,13 +74,25 @@ class OpenAICompatibleAdapter(AIAdapter):
             max_retries=0,
         )
 
-    def generate(self, history, user_message) -> str:
+    def _build_messages(self, history, user_message):
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(history)
         messages.append({"role": "user", "content": user_message})
+        return messages
+
+    @staticmethod
+    def _parse_tpm_overage(error_str: str):
+        """'Limit 8000, Requested 9763' gibi bir hatadan (limit, requested) tuple'ı çıkarır."""
+        match = re.search(r"Limit (\d+), Requested (\d+)", error_str)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+        return None
+
+    def generate(self, history, user_message) -> str:
+        messages = self._build_messages(history, user_message)
 
         last_error = None
-        for attempt in range(2):
+        for attempt in range(4):
             try:
                 response = self.client.chat.completions.create(
                     model=self.info["model_name"],
@@ -92,6 +105,30 @@ class OpenAICompatibleAdapter(AIAdapter):
                 logger.warning(f"Geçici hata (rate limit/sunucu), {attempt + 1}. deneme, bekleniyor...")
                 time.sleep(4)
             except Exception as e:
+                error_str = str(e)
+                too_large = (
+                    "tokens per minute" in error_str
+                    or "Request too large" in error_str
+                    or "rate_limit_exceeded" in error_str
+                )
+                if too_large and len(history) > 2:
+                    overage = self._parse_tpm_overage(error_str)
+                    if overage:
+                        limit, requested = overage
+                        # Ne kadar fazlaysa (+ güvenlik payı) o oranda geçmişten kırp,
+                        # sabit bir sayıya değil, gerçek fazlalığa göre.
+                        cut_ratio = min(0.9, max(0.15, (requested - limit) / requested + 0.15))
+                    else:
+                        cut_ratio = 0.5
+                    new_len = max(2, int(len(history) * (1 - cut_ratio)))
+                    if new_len < len(history):
+                        logger.warning(
+                            f"Mesaj çok büyük (TPM limiti), geçmiş {len(history)} -> {new_len} "
+                            f"mesaja kırpılıp tekrar deneniyor..."
+                        )
+                        history = history[-new_len:]
+                        messages = self._build_messages(history, user_message)
+                        continue
                 logger.exception("OpenAI uyumlu sağlayıcıda hata")
                 raise ProviderError(str(e)) from e
 
@@ -120,6 +157,17 @@ class GeminiAdapter(AIAdapter):
         for attempt in range(4):
             try:
                 resp = requests.post(url, json=payload, timeout=60)
+                if resp.status_code == 403:
+                    raise ProviderError(
+                        "Gemini 403 hatası: API key yanlış olabilir, Google AI Studio'da "
+                        "Gemini API açık olmayabilir ya da bu modele erişimin yok. "
+                        "GOOGLE_AI_STUDIO_API_KEY'i kontrol et."
+                    )
+                if resp.status_code == 404:
+                    raise ProviderError(
+                        f"Gemini model hatası: '{self.info['model_name']}' modeli bulunamadı. "
+                        "Model adı değişmiş olabilir."
+                    )
                 if resp.status_code == 429 or resp.status_code >= 500:
                     last_error = f"{resp.status_code} {resp.reason}"
                     kind = "rate limit" if resp.status_code == 429 else "geçici sunucu hatası"
@@ -129,6 +177,8 @@ class GeminiAdapter(AIAdapter):
                 resp.raise_for_status()
                 data = resp.json()
                 return data["candidates"][0]["content"]["parts"][0]["text"]
+            except ProviderError:
+                raise
             except requests.HTTPError as e:
                 logger.exception("Gemini hata")
                 raise ProviderError(str(e)) from e
